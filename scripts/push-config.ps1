@@ -8,9 +8,24 @@ param(
   [string]$Package = "com.mikesigs.stuzer"
 )
 $ErrorActionPreference = "Stop"
+
+function Invoke-Adb {
+  param([Parameter(ValueFromRemainingArguments)][string[]]$Args)
+  $out = & adb @Args 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    throw "adb $($Args -join ' ') failed:`n$($out -join "`n")"
+  }
+  $out
+}
+
+$state = (& adb get-state 2>&1)
+if ($state -ne "device") {
+  throw "No authorized device (adb get-state said '$state'). Plug in and accept the USB debugging prompt."
+}
+
 $tmp = "/data/local/tmp/stuzer.json"
-adb push $Config $tmp | Out-Null
-adb shell run-as $Package sh -c "mkdir -p files && cp $tmp files/stuzer.json && cat files/stuzer.json"
-adb shell am force-stop $Package
-adb shell am start -n "$Package/.MainActivity" | Out-Null
+Invoke-Adb push $Config $tmp | Out-Null
+Invoke-Adb shell run-as $Package sh -c "'mkdir -p files && cp $tmp files/stuzer.json && cat files/stuzer.json'"
+Invoke-Adb shell am force-stop $Package | Out-Null
+Invoke-Adb shell am start -n "$Package/.MainActivity" | Out-Null
 Write-Host "Pushed $Config and restarted $Package"
