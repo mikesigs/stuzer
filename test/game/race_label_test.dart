@@ -1,8 +1,10 @@
 import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:stuzer/domain/modes/race/race_session.dart';
 import 'package:stuzer/domain/round.dart';
 import 'package:stuzer/game/finger_label.dart';
+import 'package:stuzer/game/modes/race_mode.dart';
 
 const _o = Point<double>(0, 0);
 Duration s(num seconds) => Duration(milliseconds: (seconds * 1000).round());
@@ -21,27 +23,32 @@ void main() {
     expect(formatOffset(s(0.31), signed: false), '0.310s');
   });
 
-  test('labels through a Round', () {
-    final round = Round();
+  test('labels through a Race', () {
+    final round = Round(
+      startMode: (f, at) =>
+          RaceSession(fingers: f, lockInAt: at, beat: const Duration(seconds: 1)),
+    );
     round.fingerDown(1, _o, s(0));
     round.fingerDown(2, _o, s(0.1));
     round.fingerDown(3, _o, s(0.2));
     final fingers = {for (final f in round.fingers) f.id: f};
-    expect(labelFor(fingers[1]!, round), FingerLabel.none);
+    FingerLabel label(int id) =>
+        raceLabelFor(fingers[id]!, round.session! as RaceSession, round.fingers);
 
     round.advance(s(3.2)); // Lock-in at 3.2, Go at 7.2
+    expect(label(1), FingerLabel.none);
     round.fingerUp(1, s(5)); // False Start
-    expect(labelFor(fingers[1]!, round), const FingerLabel(big: '!', alarm: true));
+    expect(label(1), const FingerLabel(big: '!', alarm: true));
 
     round.advance(s(7.2));
     round.fingerUp(2, s(7.45));
-    expect(labelFor(fingers[2]!, round), const FingerLabel(big: '1st', small: '+0.250s'));
-    expect(labelFor(fingers[3]!, round), FingerLabel.none);
+    expect(label(2), const FingerLabel(big: '1st', small: '+0.250s'));
+    expect(label(3), FingerLabel.none);
 
     round.advance(s(12.2)); // Race closes; 3 is a Straggler
-    expect(labelFor(fingers[2]!, round), const FingerLabel(big: '1st', small: '+0.250s'));
-    expect(labelFor(fingers[1]!, round),
+    expect(label(2), const FingerLabel(big: '1st', small: '+0.250s'));
+    expect(label(1),
         const FingerLabel(big: '2nd', small: '2.200s early', alarm: true));
-    expect(labelFor(fingers[3]!, round), const FingerLabel(big: '3rd', small: 'Held'));
+    expect(label(3), const FingerLabel(big: '3rd', small: 'Held'));
   });
 }

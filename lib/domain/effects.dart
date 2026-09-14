@@ -1,5 +1,5 @@
 import 'finger.dart';
-import 'standings.dart';
+import 'mode.dart';
 
 /// Why a Round was Aborted.
 enum AbortReason {
@@ -10,13 +10,16 @@ enum AbortReason {
   /// The app lost focus (call, notification shade, home).
   lostFocus,
 
-  /// Every Finger lifted after Lock-in but before the Countdown reached "1".
+  /// Every Finger lifted before the Mode could reach a decision.
   everyoneLetGo,
 }
 
 /// Something the presentation layer should react to (sound, haptic, visual).
-/// The Round emits these; it never plays them itself.
-sealed class RoundEffect {
+/// The Round and its Mode emit these; they never play them themselves.
+///
+/// Shared effects live here. Each Mode defines its own subclasses in its
+/// own folder, and only that Mode's presentation knows how to render them.
+abstract class RoundEffect {
   const RoundEffect();
 }
 
@@ -36,42 +39,10 @@ class LockedIn extends RoundEffect {
   final List<Finger> fingers;
 }
 
-class CountdownTick extends RoundEffect {
-  const CountdownTick(this.number);
-  final int number;
-}
-
-class Go extends RoundEffect {
-  const Go();
-}
-
-class FalseStarted extends RoundEffect {
-  const FalseStarted(this.finger);
-  final Finger finger;
-}
-
-/// A Finger lifted after Go. [place] is final: later Lifts cannot beat it.
-class Lifted extends RoundEffect {
-  const Lifted(this.finger, this.place);
-  final Finger finger;
-  final int place;
-  bool get isWinner => place == 1;
-}
-
-/// Held Fingers are being teased. Fires [RoundConfig.stragglerMessageCount]
-/// times, every [RoundConfig.stragglerMessageInterval], starting
-/// [RoundConfig.stragglerAfter] after Go.
-class StragglersTeased extends RoundEffect {
-  const StragglersTeased(this.stragglers, this.messageIndex);
-  final List<Finger> stragglers;
-
-  /// 0-based tease number within this Race.
-  final int messageIndex;
-}
-
-class RaceClosed extends RoundEffect {
-  const RaceClosed(this.placements);
-  final List<Placement> placements;
+/// The Mode has decided. Carries the full Ranking.
+class RoundFinished extends RoundEffect {
+  const RoundFinished(this.ranking);
+  final Ranking ranking;
 }
 
 class Aborted extends RoundEffect {

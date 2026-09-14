@@ -3,14 +3,16 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
-import '../config/round_config_json.dart';
+import '../config/app_config_json.dart';
 import '../domain/round.dart';
 import 'finger_label.dart';
 import 'finger_palette.dart';
+import 'modes/mode_registry.dart';
 import 'round_controller.dart';
 
 /// The single screen of Stuzer. A full-screen [Listener] feeds raw pointer
-/// events to the controller; a [CustomPainter] draws everything.
+/// events to the controller; a [CustomPainter] draws the shared layer and
+/// the active Mode adds its own.
 class GameScreen extends StatefulWidget {
   const GameScreen({super.key, required this.controller});
 
@@ -71,6 +73,10 @@ class _GameScreenState extends State<GameScreen>
               alignment: Alignment.bottomLeft,
               child: _ConfigCaption(controller: c),
             ),
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: ModePicker(controller: c),
+            ),
           ],
         ),
       ),
@@ -78,7 +84,7 @@ class _GameScreenState extends State<GameScreen>
   }
 }
 
-/// Text that sits above the painted layer: hints, countdown, messages.
+/// Text above the painted layer: shared hints, plus the Mode's overlay.
 class _Overlay extends StatelessWidget {
   const _Overlay({required this.controller});
 
@@ -88,49 +94,29 @@ class _Overlay extends StatelessWidget {
   Widget build(BuildContext context) {
     final round = controller.round;
     final now = controller.now;
-    final style = Theme.of(context).textTheme;
 
     Widget? message;
     switch (round.phase) {
       case RoundPhase.gathering:
         if (round.fingers.isEmpty) {
-          message = _Hint('Everyone, put a finger on the screen');
+          message = const _Hint('Everyone, put a finger on the screen');
         } else if (round.fingers.length < round.config.minFingers) {
-          message = _Hint('Add more fingers');
+          message = const _Hint('Add more fingers');
         }
-      case RoundPhase.locked:
-        message = _Hint('Locked in', emphasis: true);
-      case RoundPhase.countdown:
-      case RoundPhase.race:
-        final number = controller.lastTickNumber;
-        final at = controller.lastTickAt;
-        if (number != null && at != null) {
-          final progress =
-              (now - at).inMicroseconds / round.config.beat.inMicroseconds;
-          message = _FilmCountdown(
-            text: number == 0 ? 'GO' : '$number',
-            progress: progress.clamp(0.0, 1.0),
-            isGo: number == 0,
-          );
-        }
-        if (round.phase == RoundPhase.race &&
-            controller.stragglerMessage != null) {
-          message = Stack(children: [
-            ?message,
-            _Hint(controller.stragglerMessage!,
-                alignment: const Alignment(0, 0.7)),
-          ]);
-        }
+      case RoundPhase.playing:
+        message = controller.modeUi.buildOverlay(context, round, now);
       case RoundPhase.results:
-        message = const _Hint(
-          'Touch to play again',
-          small: true,
-          alignment: Alignment(0, 0.88),
-        );
+        message = Stack(fit: StackFit.expand, children: [
+          ?controller.modeUi.buildOverlay(context, round, now),
+          const _Hint(
+            'Touch to play again',
+            small: true,
+            alignment: Alignment(0, 0.88),
+          ),
+        ]);
       case RoundPhase.aborted:
-        final reason = controller.abortReason;
         message = _Hint(
-          switch (reason) {
+          switch (controller.abortReason) {
             AbortReason.lostFocus => 'Interrupted. Touch to start over.',
             AbortReason.everyoneLetGo =>
               'Everyone let go!\nTouch to start over.',
@@ -143,7 +129,10 @@ class _Overlay extends StatelessWidget {
 
     return IgnorePointer(
       child: DefaultTextStyle(
-        style: style.headlineMedium!.copyWith(color: Colors.white),
+        style: Theme.of(context)
+            .textTheme
+            .headlineMedium!
+            .copyWith(color: Colors.white),
         child: message ?? const SizedBox.shrink(),
       ),
     );
@@ -181,154 +170,106 @@ class _Hint extends StatelessWidget {
   }
 }
 
-/// An old film-leader countdown: a big number dead centre inside concentric
-/// rings and crosshairs, with a radial wipe sweeping once round per beat.
-class _FilmCountdown extends StatelessWidget {
-  const _FilmCountdown({
-    required this.text,
-    required this.progress,
-    required this.isGo,
-  });
+/// Shows the active Mode while the screen is empty. Tapping opens a sheet
+/// to switch. Hidden the moment a finger lands.
+class ModePicker extends StatelessWidget {
+  const ModePicker({super.key, required this.controller});
 
-  final String text;
+  final RoundController controller;
 
-  /// 0..1 through the current beat.
-  final double progress;
-  final bool isGo;
+  bool get _visible =>
+      controller.round.phase == RoundPhase.gathering &&
+      controller.round.fingers.isEmpty;
 
   @override
   Widget build(BuildContext context) {
-    final color = isGo ? const Color(0xFF7CFF6B) : Colors.white;
-    // A quick pop as each number lands, then a settle.
-    final pop = 1.0 + 0.18 * (1 - Curves.easeOutCubic.transform(
-        (progress / 0.18).clamp(0.0, 1.0)));
-    // Projector flicker.
-    final flicker = 0.9 + 0.1 * (0.5 + 0.5 * sin(progress * 47));
-    return LayoutBuilder(builder: (context, constraints) {
-      final side = min(constraints.maxWidth, constraints.maxHeight) * 0.92;
-      return Center(
-        child: SizedBox(
-          width: side,
-          height: side,
-          child: CustomPaint(
-            painter: _FilmReelPainter(
-              progress: progress,
-              color: color,
-              isGo: isGo,
-            ),
-            child: Center(
-              child: Transform.scale(
-                scale: pop,
-                child: Opacity(
-                  opacity: flicker,
-                  child: Text(
-                    text,
-                    style: TextStyle(
-                      fontSize: isGo ? side * 0.42 : side * 0.62,
-                      height: 1,
-                      fontWeight: FontWeight.w900,
-                      color: color,
-                      shadows: [
-                        Shadow(
-                            color: color.withValues(alpha: 0.5),
-                            blurRadius: 30),
-                      ],
-                    ),
+    if (!_visible) return const SizedBox.shrink();
+    final mode = controller.mode;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 18),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Material(
+              color: Colors.white.withValues(alpha: 0.08),
+              shape: const StadiumBorder(
+                side: BorderSide(color: Colors.white24),
+              ),
+              child: InkWell(
+                customBorder: const StadiumBorder(),
+                onTap: () => _openSheet(context),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(mode.icon, size: 18, color: Colors.white70),
+                      const SizedBox(width: 8),
+                      Text(
+                        mode.name.toUpperCase(),
+                        style: const TextStyle(
+                          fontSize: 14,
+                          letterSpacing: 2,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.expand_more,
+                          size: 18, color: Colors.white54),
+                    ],
                   ),
                 ),
               ),
             ),
-          ),
+            const SizedBox(height: 8),
+            Text(
+              mode.tagline,
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.white.withValues(alpha: 0.55),
+              ),
+            ),
+          ],
         ),
-      );
-    });
-  }
-}
-
-class _FilmReelPainter extends CustomPainter {
-  const _FilmReelPainter({
-    required this.progress,
-    required this.color,
-    required this.isGo,
-  });
-
-  final double progress;
-  final Color color;
-  final bool isGo;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final c = size.center(Offset.zero);
-    final r = size.shortestSide / 2;
-
-    final thin = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2
-      ..color = color.withValues(alpha: 0.35);
-    final thick = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 5
-      ..color = color.withValues(alpha: 0.85);
-
-    // Crosshairs out past the rings.
-    canvas.drawLine(Offset(c.dx - r * 1.15, c.dy), Offset(c.dx + r * 1.15, c.dy), thin);
-    canvas.drawLine(Offset(c.dx, c.dy - r * 1.15), Offset(c.dx, c.dy + r * 1.15), thin);
-
-    // Rings.
-    canvas.drawCircle(c, r * 0.98, thick);
-    canvas.drawCircle(c, r * 0.86, thin);
-
-    if (isGo) {
-      // Rings burst outward on Go.
-      final burst = Curves.easeOut.transform(progress);
-      canvas.drawCircle(
-        c,
-        r * (0.98 + 0.6 * burst),
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 10 * (1 - burst) + 1
-          ..color = color.withValues(alpha: 0.8 * (1 - burst)),
-      );
-      return;
-    }
-
-    // Radial wipe: a wedge sweeping clockwise from twelve o'clock, filled
-    // faintly, with a bright leading hand.
-    final sweep = 2 * pi * progress;
-    final rect = Rect.fromCircle(center: c, radius: r * 0.86);
-    canvas.drawArc(
-      rect,
-      -pi / 2,
-      sweep,
-      true,
-      Paint()..color = color.withValues(alpha: 0.10),
+      ),
     );
-    final hand = Offset(c.dx + cos(-pi / 2 + sweep) * r * 0.86,
-        c.dy + sin(-pi / 2 + sweep) * r * 0.86);
-    canvas.drawLine(
-      c,
-      hand,
-      Paint()
-        ..strokeWidth = 3
-        ..strokeCap = StrokeCap.round
-        ..color = color.withValues(alpha: 0.9),
-    );
-
-    // Tick marks around the outer ring, like sprocket holes.
-    final tick = Paint()
-      ..strokeWidth = 2
-      ..color = color.withValues(alpha: 0.5);
-    for (var i = 0; i < 24; i++) {
-      final a = i * pi / 12;
-      final inner = Offset(c.dx + cos(a) * r * 0.90, c.dy + sin(a) * r * 0.90);
-      final outer = Offset(c.dx + cos(a) * r * 0.95, c.dy + sin(a) * r * 0.95);
-      canvas.drawLine(inner, outer, tick);
-    }
   }
 
-  @override
-  bool shouldRepaint(covariant _FilmReelPainter old) =>
-      old.progress != progress || old.color != color || old.isGo != isGo;
+  void _openSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF151827),
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.only(bottom: 12),
+          children: [
+            for (final m in allModes)
+              ListTile(
+                leading: Icon(m.icon,
+                    color: m.id == controller.mode.id
+                        ? Colors.white
+                        : Colors.white54),
+                title: Text(m.name,
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: Text(m.tagline),
+                trailing: m.id == controller.mode.id
+                    ? const Icon(Icons.check, color: Colors.white)
+                    : null,
+                onTap: () {
+                  controller.selectMode(m);
+                  Navigator.of(context).pop();
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// Shows the active timings while Gathering, so a pushed config is visible.
@@ -348,7 +289,7 @@ class _ConfigCaption extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Text(
-            describeRoundConfig(round.config),
+            describeConfig(controller.config, controller.mode.id),
             style: TextStyle(
               fontSize: 12,
               color: Colors.white.withValues(alpha: 0.35),
@@ -385,7 +326,8 @@ class _MuteButton extends StatelessWidget {
   }
 }
 
-/// Draws finger discs, place labels, and transient bursts.
+/// Draws finger discs, Mode labels and styles, transient bursts, and lets
+/// the Mode paint over the top.
 class _GamePainter extends CustomPainter {
   _GamePainter(this.c) : super(repaint: c);
 
@@ -397,37 +339,66 @@ class _GamePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final now = c.now;
     final round = c.round;
+    final ui = c.modeUi;
 
     _paintBursts(canvas, now);
 
     for (final finger in round.fingers) {
       final pos = Offset(finger.position.x, finger.position.y);
-      _paintDisc(canvas, pos, fingerColor(finger.ordinal), finger, round);
+      final style = ui.styleFor(finger, round, now);
+      _paintDisc(canvas, pos, fingerColor(finger.ordinal), finger, style);
+      final label = ui.labelFor(finger, round);
+      _paintLabel(canvas, pos, label);
     }
+
+    ui.paintOver(canvas, size, round, now);
   }
 
   void _paintDisc(
-      Canvas canvas, Offset pos, Color color, Finger finger, Round round) {
+      Canvas canvas, Offset pos, Color color, Finger finger, FingerStyle s) {
     final held = finger.isHeld;
+    final a = s.alpha;
 
     // Glow.
-    final glow = Paint()
-      ..color = color.withValues(alpha: held ? 0.45 : 0.25)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 30);
-    canvas.drawCircle(pos, discRadius * 1.3, glow);
+    canvas.drawCircle(
+      pos,
+      discRadius * 1.3,
+      Paint()
+        ..color = color.withValues(alpha: (held ? 0.45 : 0.25) * a)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 30),
+    );
 
     // Disc.
-    final disc = Paint()..color = color.withValues(alpha: held ? 0.95 : 0.55);
-    canvas.drawCircle(pos, discRadius, disc);
+    canvas.drawCircle(
+      pos,
+      discRadius,
+      Paint()..color = color.withValues(alpha: (held ? 0.95 : 0.55) * a),
+    );
 
     // Rim.
-    final rim = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 4
-      ..color = Colors.white.withValues(alpha: held ? 0.9 : 0.4);
-    canvas.drawCircle(pos, discRadius, rim);
+    canvas.drawCircle(
+      pos,
+      discRadius,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 4
+        ..color = Colors.white.withValues(alpha: (held ? 0.9 : 0.4) * a),
+    );
 
-    final label = labelFor(finger, round);
+    // Mode ring.
+    if (s.ring > 0) {
+      canvas.drawCircle(
+        pos,
+        discRadius + 8 + s.ring / 2,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = s.ring
+          ..color = s.ringColor ?? Colors.white,
+      );
+    }
+  }
+
+  void _paintLabel(Canvas canvas, Offset pos, FingerLabel label) {
     final labelColor = label.alarm ? const Color(0xFFFF3B3B) : Colors.white;
     final big = label.big;
     final small = label.small;
@@ -469,7 +440,8 @@ class _GamePainter extends CustomPainter {
               Paint()
                 ..style = PaintingStyle.stroke
                 ..strokeWidth = 14 * (1 - lp) + 2
-                ..color = const Color(0xFFFF2A2A).withValues(alpha: 0.9 * (1 - lp)),
+                ..color =
+                    const Color(0xFFFF2A2A).withValues(alpha: 0.9 * (1 - lp)),
             );
           }
           // Angry spikes.
@@ -486,16 +458,19 @@ class _GamePainter extends CustomPainter {
           }
         case BurstKind.confetti:
           if (t > 3.0) continue;
-          _confetti(canvas, pos, t, 90, 620, seedBase: b.startedAt.inMilliseconds);
+          _confetti(canvas, pos, t, 90, 620,
+              seedBase: b.startedAt.inMilliseconds);
         case BurstKind.flourish:
           if (t > 1.6) continue;
-          _confetti(canvas, pos, t, 28, 320, seedBase: b.startedAt.inMilliseconds);
+          _confetti(canvas, pos, t, 28, 320,
+              seedBase: b.startedAt.inMilliseconds);
       }
     }
   }
 
   void _confetti(Canvas canvas, Offset origin, double t, int count,
-      double speed, {required int seedBase}) {
+      double speed,
+      {required int seedBase}) {
     final rnd = Random(seedBase);
     for (var i = 0; i < count; i++) {
       final angle = rnd.nextDouble() * 2 * pi;
@@ -513,7 +488,9 @@ class _GamePainter extends CustomPainter {
       canvas.save();
       canvas.translate(x, y);
       canvas.rotate(spin * t);
-      canvas.drawRect(Rect.fromCenter(center: Offset.zero, width: size, height: size * 0.6), paint);
+      canvas.drawRect(
+          Rect.fromCenter(center: Offset.zero, width: size, height: size * 0.6),
+          paint);
       canvas.restore();
     }
   }

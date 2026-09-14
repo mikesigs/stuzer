@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'app_config.dart';
-import 'round_config_json.dart';
+import 'app_config_json.dart';
 
 /// Reads the tuning file from the app's private storage on the device.
 ///
@@ -38,7 +38,8 @@ class ConfigStore {
         return defaults;
       }
       final config = appConfigFromJson(decoded);
-      debugPrint('Stuzer config: ${describeRoundConfig(config.round)}, '
+      debugPrint('Stuzer config: ${describeConfig(config, 'race')}; '
+          '${describeConfig(config, 'classic')}; '
           '${config.stragglerMessages.length} straggler messages');
       return config;
     } catch (e) {

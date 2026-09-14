@@ -1,40 +1,47 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stuzer/audio/sound_engine.dart';
+import 'package:stuzer/domain/modes/classic/classic_session.dart';
+import 'package:stuzer/domain/modes/race/race_session.dart';
 import 'package:stuzer/domain/round.dart';
 import 'package:stuzer/game/finger_label.dart';
+import 'package:stuzer/game/modes/mode_registry.dart';
 import 'package:stuzer/game/round_controller.dart';
 import 'package:stuzer/main.dart';
 
 Duration s(num seconds) => Duration(milliseconds: (seconds * 1000).round());
 
-/// Fingers land at 0, Lock-in 3, ticks 3/2/1 at 4/5/6, Go 7, close 12.
+/// Race timeline: fingers land at 0, Lock-in 3, ticks 3/2/1 at 4/5/6, Go 7,
+/// close 12. Classic: Lock-in 3, Locked to 4, Suspense to 7.
 
-/// Disc labels are painted on a canvas, so read them through [labelFor].
+/// Disc labels are painted on a canvas, so read them through the Mode UI.
 FingerLabel labelOf(RoundController c, int pointer) {
   final finger = c.round.fingers.singleWhere((f) => f.id == pointer);
-  return labelFor(finger, c.round);
+  return c.modeUi.labelFor(finger, c.round);
 }
 
-Future<RoundController> pumpApp(WidgetTester tester) async {
+Future<RoundController> pumpApp(WidgetTester tester,
+    {GameMode mode = const RaceMode()}) async {
   tester.view.physicalSize = const Size(1600, 800);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
-  final controller = RoundController(sounds: SoundEngine.silent());
+  final controller = RoundController(sounds: SoundEngine.silent(), mode: mode);
   await tester.pumpWidget(StuzerApp(controller: controller));
   return controller;
 }
 
 void main() {
-  testWidgets('two fingers play a full Round through the real screen',
+  testWidgets('two fingers play a full Race through the real screen',
       (tester) async {
     final controller = await pumpApp(tester);
     expect(find.text('Everyone, put a finger on the screen'), findsOneWidget);
+    expect(find.text('RACE'), findsOneWidget);
 
     // Two fingers land at t=0.
     final left = await tester.startGesture(const Offset(300, 400), pointer: 1);
     await tester.pump();
     expect(find.text('Add more fingers'), findsOneWidget);
+    expect(find.text('RACE'), findsNothing, reason: 'picker hides on touch');
     expect(controller.round.phase, RoundPhase.gathering);
 
     final right =
@@ -44,26 +51,26 @@ void main() {
 
     // Lock-in after 3 seconds of stability.
     await tester.pump(s(3));
-    expect(controller.round.phase, RoundPhase.locked);
+    expect(controller.round.phase, RoundPhase.playing);
     expect(find.text('Locked in'), findsOneWidget);
 
     // Countdown 3, 2, 1, one per beat.
     for (final n in [3, 2, 1]) {
       await tester.pump(s(1));
-      expect(controller.round.phase, RoundPhase.countdown);
       expect(find.text('$n'), findsOneWidget, reason: 'expected $n on screen');
     }
 
     // Go at 7 s.
     await tester.pump(s(1));
-    expect(controller.round.phase, RoundPhase.race);
-    expect(controller.round.goAt, s(7));
+    final race = controller.round.session! as RaceSession;
+    expect(race.phase, RacePhase.racing);
+    expect(race.goAt, s(7));
     expect(find.text('GO'), findsOneWidget);
 
     // Right finger lifts first and wins; left lifts next.
     await right.up(timeStamp: s(7.2));
     await tester.pump();
-    expect(controller.round.phase, RoundPhase.race);
+    expect(controller.round.phase, RoundPhase.playing);
     expect(labelOf(controller, 2),
         const FingerLabel(big: '1st', small: '+0.200s'));
 
@@ -83,11 +90,13 @@ void main() {
     expect(find.text('Add more fingers'), findsOneWidget);
     await again.up(timeStamp: s(20));
     await tester.pump();
+    expect(find.text('RACE'), findsOneWidget);
   });
 
   testWidgets('a False Start shows the alarm, and Stragglers get teased',
       (tester) async {
     final controller = await pumpApp(tester);
+    final ui = controller.modeUi as RaceUi;
 
     final a = await tester.startGesture(const Offset(300, 400), pointer: 1);
     final b = await tester.startGesture(const Offset(800, 400), pointer: 2);
@@ -101,12 +110,12 @@ void main() {
         hasLength(1));
 
     await tester.pump(s(2)); // 7.5 s: Go was at 7
-    expect(controller.round.phase, RoundPhase.race);
+    expect((controller.round.session! as RaceSession).phase, RacePhase.racing);
 
     await b.up(timeStamp: s(7.3));
     await tester.pump(s(2)); // 9.5 s: first tease at 9
-    expect(controller.stragglerMessage, isNotNull);
-    expect(find.text(controller.stragglerMessage!), findsOneWidget);
+    expect(ui.stragglerMessage, isNotNull);
+    expect(find.text(ui.stragglerMessage!), findsOneWidget);
 
     await tester.pump(s(3)); // 12.5 s: Race closed at 12
     expect(controller.round.phase, RoundPhase.results);
@@ -116,7 +125,7 @@ void main() {
         const FingerLabel(big: '2nd', small: '1.500s early', alarm: true));
     expect(
         labelOf(controller, 3), const FingerLabel(big: '3rd', small: 'Held'));
-    expect(controller.stragglerMessage, isNull);
+    expect(ui.stragglerMessage, isNull);
 
     await c.up(timeStamp: s(13));
     await tester.pump();
@@ -129,7 +138,7 @@ void main() {
     final a = await tester.startGesture(const Offset(300, 400), pointer: 1);
     final b = await tester.startGesture(const Offset(1300, 400), pointer: 2);
     await tester.pump(s(3));
-    expect(controller.round.phase, RoundPhase.locked);
+    expect(controller.round.phase, RoundPhase.playing);
 
     await a.up(timeStamp: s(3.2));
     await b.up(timeStamp: s(3.4));
@@ -144,7 +153,7 @@ void main() {
     final a = await tester.startGesture(const Offset(300, 400), pointer: 1);
     final b = await tester.startGesture(const Offset(1300, 400), pointer: 2);
     await tester.pump(s(4));
-    expect(controller.round.phase, RoundPhase.countdown);
+    expect(controller.round.phase, RoundPhase.playing);
 
     controller.onAppHidden();
     await tester.pump();
@@ -155,5 +164,63 @@ void main() {
     await b.up(timeStamp: s(5));
     await tester.pump();
     expect(controller.round.phase, RoundPhase.aborted);
+  });
+
+  testWidgets('Classic picks one finger and shows no ranking labels',
+      (tester) async {
+    final controller = await pumpApp(tester, mode: const ClassicMode());
+    expect(find.text('CLASSIC'), findsOneWidget);
+
+    final a = await tester.startGesture(const Offset(300, 400), pointer: 1);
+    final b = await tester.startGesture(const Offset(1300, 400), pointer: 2);
+    await tester.pump(s(3));
+    expect(controller.round.phase, RoundPhase.playing);
+    expect(find.text('Locked in'), findsOneWidget);
+
+    await tester.pump(s(1.5)); // Suspense under way
+    final classic = controller.round.session! as ClassicSession;
+    expect(classic.phase, ClassicPhase.suspense);
+    expect(classic.spotlight, isNotNull);
+    expect(find.text('Locked in'), findsNothing);
+
+    await tester.pump(s(3)); // 7.5 s: Suspense ended at 7
+    expect(controller.round.phase, RoundPhase.results);
+    expect(classic.chosen, isNotNull);
+    expect(controller.round.ranking!.decidedPlaces, 1);
+    expect(find.text('You go first'), findsOneWidget);
+    expect(find.text('Touch to play again'), findsOneWidget);
+    for (final f in controller.round.fingers) {
+      expect(labelOf(controller, f.id), FingerLabel.none);
+    }
+    expect(controller.bursts.where((x) => x.kind == BurstKind.confetti),
+        hasLength(1));
+
+    await a.up(timeStamp: s(8));
+    await b.up(timeStamp: s(8));
+    await tester.pump();
+    expect(controller.round.phase, RoundPhase.results);
+  });
+
+  testWidgets('the picker switches Mode from the empty screen',
+      (tester) async {
+    final controller = await pumpApp(tester);
+    final changes = <String>[];
+    controller.onModeChanged = (m) => changes.add(m.id);
+
+    // The screen repaints every frame, so pumpAndSettle would never settle;
+    // pump through the sheet's animation explicitly.
+    await tester.tap(find.text('RACE'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(find.text('Classic'), findsOneWidget);
+
+    await tester.tap(find.text('Classic'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(controller.mode.id, 'classic');
+    expect(changes, ['classic']);
+    expect(find.text('CLASSIC'), findsOneWidget);
+    expect(find.textContaining('suspense'), findsOneWidget,
+        reason: 'caption follows the mode');
   });
 }

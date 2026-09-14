@@ -1,6 +1,7 @@
-import 'finger.dart';
+import '../../finger.dart';
+import '../../mode.dart';
 
-/// Why a Finger earned the Place it did.
+/// Why a Finger earned the Place it did in a Race.
 enum LiftKind {
   /// Lifted after Go.
   legitimate,
@@ -12,7 +13,7 @@ enum LiftKind {
   straggler,
 }
 
-/// A Finger's final standing in a Round.
+/// A Finger's final standing in a Race.
 class Placement {
   const Placement({
     required this.finger,
@@ -35,16 +36,13 @@ class Placement {
   String toString() => '$place: $finger $kind $offsetFromGo';
 }
 
-/// Orders Fingers by the spec's placement rules.
+/// Orders Fingers by the Race rules.
 ///
 /// Legitimate Lifts first (earliest Lift wins), then False Starts (the
 /// earliest jump is last), then Stragglers. Every tie is broken by landing
 /// order: the Finger that landed first wins.
 List<Placement> rankFingers(Iterable<Finger> fingers, Duration goAt) {
-  int byLanding(Finger a, Finger b) {
-    final c = a.landedAt.compareTo(b.landedAt);
-    return c != 0 ? c : a.ordinal.compareTo(b.ordinal);
-  }
+  final byLanding = Ranking.byLanding;
 
   final legit = <Finger>[];
   final falseStarts = <Finger>[];

@@ -11,7 +11,8 @@
   "mounts": [
     "source=stuzer-pub-cache,target=/caches/pub,type=volume",
     "source=stuzer-gradle-cache,target=/caches/gradle,type=volume",
-    "source=stuzer-android-home,target=/root/.android,type=volume"
+    "source=stuzer-android-home,target=/root/.android,type=volume",
+    "source=stuzer-android-cmake,target=/opt/android-sdk-linux/cmake,type=volume"
   ],
   "customizations": {
     "vscode": {

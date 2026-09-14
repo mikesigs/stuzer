@@ -9,8 +9,9 @@ import '../audio/sound_engine.dart';
 import '../config/app_config.dart';
 import '../domain/round.dart';
 import 'finger_palette.dart';
+import 'modes/mode_registry.dart';
 
-/// A transient visual triggered by a Round effect, drawn by the painter.
+/// A transient visual triggered by an effect, drawn by the shared painter.
 class Burst {
   Burst({
     required this.kind,
@@ -25,10 +26,9 @@ class Burst {
   final Duration startedAt;
 }
 
-enum BurstKind { ripple, falseStart, confetti, flourish }
-
 /// Drives a [Round] from Flutter pointer events and wall-clock timers, plays
-/// sounds and haptics for its effects, and exposes the visual state.
+/// shared sounds and haptics, hands Mode-specific effects to the active
+/// [ModeUi], and exposes the visual state.
 ///
 /// All times are on the pointer-event timeline (device uptime). Timers are
 /// scheduled from the Round's [Round.nextDeadline] rather than polled.
@@ -36,67 +36,30 @@ class RoundController extends ChangeNotifier {
   RoundController({
     required this.sounds,
     AppConfig config = const AppConfig(),
+    GameMode mode = defaultMode,
     Random? random,
   })  : _config = config,
-        _round = Round(config: config.round),
-        _random = random ?? Random();
+        _mode = mode,
+        _modeUi = mode.createUi(),
+        _random = random ?? Random() {
+    _round = _buildRound();
+  }
+  // ignore_for_file: prefer_initializing_formals
 
-  AppConfig _config;
-  AppConfig get config => _config;
-  Round _round;
-  Round get round => _round;
   final SoundEngine sounds;
   final Random _random;
 
-  /// Teasing lines for the current Race, drawn at random from the pool.
-  List<String> _teaseOrder = const [];
+  AppConfig _config;
+  AppConfig get config => _config;
 
-  /// Swap in new tuning. Only takes effect while no Round is in progress,
-  /// so a live Countdown is never disturbed. Returns whether it applied.
-  bool applyConfig(AppConfig config) {
-    final idle = switch (round.phase) {
-      RoundPhase.gathering => round.fingers.isEmpty,
-      RoundPhase.results || RoundPhase.aborted => true,
-      _ => false,
-    };
-    if (!idle) return false;
-    _timer?.cancel();
-    _config = config;
-    _round = Round(config: config.round);
-    bursts.clear();
-    stragglerMessage = null;
-    lastTickNumber = null;
-    abortReason = null;
-    notifyListeners();
-    return true;
-  }
+  GameMode _mode;
+  GameMode get mode => _mode;
 
-  /// A fresh random order of the message pool, long enough for one Race.
-  /// No line repeats until the whole pool has been used.
-  List<String> _drawTeases() {
-    final pool = _config.stragglerMessages;
-    if (pool.isEmpty) return const [];
-    final needed = round.config.stragglerMessageCount;
-    final out = <String>[];
-    while (out.length < needed) {
-      final batch = List.of(pool)..shuffle(_random);
-      // Across the seam between batches, avoid showing the same line twice
-      // in a row when the pool has more than one line.
-      if (out.isNotEmpty && batch.length > 1 && batch.first == out.last) {
-        batch.add(batch.removeAt(0));
-      }
-      out.addAll(batch);
-    }
-    return out.take(needed).toList();
-  }
+  ModeUi _modeUi;
+  ModeUi get modeUi => _modeUi;
 
-  /// Test hooks: drive the Round and apply effects without arming timers.
-  @visibleForTesting
-  void debugAdvance(Duration time) => _dispatch(round.advance(time), schedule: false);
-
-  @visibleForTesting
-  void debugLift(int pointer, Duration time) =>
-      _dispatch(round.fingerUp(pointer, time), schedule: false);
+  late Round _round;
+  Round get round => _round;
 
   final _clock = Stopwatch()..start();
   Duration? _timelineOffset; // pointer timestamp minus stopwatch elapsed
@@ -104,17 +67,63 @@ class RoundController extends ChangeNotifier {
   Timer? _timer;
 
   final bursts = <Burst>[];
-  Duration? lastTickAt;
-  int? lastTickNumber;
-  String? stragglerMessage;
   AbortReason? abortReason;
   bool _cancelledByOs = false;
+
+  /// Optional source of fresh tuning, consulted on resume.
+  Future<AppConfig> Function()? loadConfig;
+
+  /// Called after the Mode changes, so the choice can be remembered.
+  void Function(GameMode mode)? onModeChanged;
 
   /// Current time on the pointer-event timeline. Never runs backwards, even
   /// if the wall clock and the pointer clock disagree.
   Duration get now {
     final t = _clock.elapsed + (_timelineOffset ?? Duration.zero);
     return t > _floor ? t : _floor;
+  }
+
+  /// No Round in progress: safe to swap Mode or tuning.
+  bool get isIdle => switch (round.phase) {
+        RoundPhase.gathering => round.fingers.isEmpty,
+        RoundPhase.results || RoundPhase.aborted => true,
+        RoundPhase.playing => false,
+      };
+
+  Round _buildRound() => Round(
+        config: _config.round,
+        startMode: (fingers, at) =>
+            _mode.createSession(fingers, at, _config, _random),
+      );
+
+  /// Swap in new tuning. Only takes effect while idle, so a live Round is
+  /// never disturbed. Returns whether it applied.
+  bool applyConfig(AppConfig config) {
+    if (!isIdle) return false;
+    _config = config;
+    _restart();
+    return true;
+  }
+
+  /// Switch Mode. Only while idle. Returns whether it applied.
+  bool selectMode(GameMode mode) {
+    if (!isIdle) return false;
+    if (mode.id != _mode.id) {
+      _mode = mode;
+      _modeUi = mode.createUi();
+      onModeChanged?.call(mode);
+    }
+    _restart();
+    return true;
+  }
+
+  void _restart() {
+    _timer?.cancel();
+    _round = _buildRound();
+    bursts.clear();
+    abortReason = null;
+    _modeUi.onRoundReset();
+    notifyListeners();
   }
 
   // ------------------------------------------------------------- pointers
@@ -164,9 +173,6 @@ class RoundController extends ChangeNotifier {
     applyConfig(config);
   }
 
-  /// Optional source of fresh tuning, consulted on resume.
-  Future<AppConfig> Function()? loadConfig;
-
   // -------------------------------------------------------------- timing
 
   void _sync(Duration pointerTime) {
@@ -191,71 +197,45 @@ class RoundController extends ChangeNotifier {
 
   void _dispatch(List<RoundEffect> effects, {bool schedule = true}) {
     for (final effect in effects) {
-      _apply(effect);
+      _applyShared(effect);
+      _modeUi.onEffect(effect, _context());
     }
     if (schedule) _schedule();
     notifyListeners();
   }
 
-  void _apply(RoundEffect effect) {
+  ModeUiContext _context() => ModeUiContext(
+        round: round,
+        sounds: sounds,
+        now: now,
+        burst: _burst,
+        random: _random,
+        config: _config,
+      );
+
+  void _applyShared(RoundEffect effect) {
     switch (effect) {
       case FingerLanded(:final finger):
         abortReason = null;
         if (finger.ordinal == 0) {
           bursts.clear();
-          stragglerMessage = null;
-          lastTickNumber = null;
+          _modeUi.onRoundReset();
         }
         sounds.fingerNote(finger.ordinal);
         HapticFeedback.lightImpact();
         _burst(BurstKind.ripple, finger);
-      case FingerLeft():
-        break;
       case LockedIn(:final fingers):
         sounds.lock();
         HapticFeedback.heavyImpact();
         for (final f in fingers) {
           _burst(BurstKind.ripple, f);
         }
-      case CountdownTick(:final number):
-        sounds.tick();
-        HapticFeedback.selectionClick();
-        lastTickAt = now;
-        lastTickNumber = number;
-      case Go():
-        sounds.go();
-        HapticFeedback.heavyImpact();
-        lastTickAt = now;
-        lastTickNumber = 0;
-        _teaseOrder = _drawTeases();
-      case FalseStarted(:final finger):
-        HapticFeedback.vibrate();
-        _burst(BurstKind.falseStart, finger);
-      case Lifted(:final finger, :final isWinner):
-        if (isWinner) sounds.ding();
-        HapticFeedback.lightImpact();
-        _burst(BurstKind.ripple, finger);
-      case StragglersTeased(:final messageIndex):
-        stragglerMessage = _teaseOrder.isEmpty
-            ? null
-            : _teaseOrder[messageIndex % _teaseOrder.length];
-      case RaceClosed(:final placements):
-        stragglerMessage = null;
-        for (final p in placements) {
-          if (p.kind != LiftKind.legitimate) continue;
-          if (p.place == 1) {
-            sounds.fanfare();
-            _burst(BurstKind.confetti, p.finger);
-          } else if (p.place <= 3) {
-            _burst(BurstKind.flourish, p.finger);
-          }
-        }
       case Aborted(:final reason):
         abortReason = reason;
         bursts.clear();
-        stragglerMessage = null;
-        lastTickNumber = null;
         HapticFeedback.vibrate();
+      default:
+        break;
     }
   }
 
@@ -268,6 +248,15 @@ class RoundController extends ChangeNotifier {
     ));
     if (bursts.length > 64) bursts.removeRange(0, bursts.length - 64);
   }
+
+  /// Test hooks: drive the Round and apply effects without arming timers.
+  @visibleForTesting
+  void debugAdvance(Duration time) =>
+      _dispatch(round.advance(time), schedule: false);
+
+  @visibleForTesting
+  void debugLift(int pointer, Duration time) =>
+      _dispatch(round.fingerUp(pointer, time), schedule: false);
 
   static Point<double> _pt(Offset o) => Point(o.dx, o.dy);
 

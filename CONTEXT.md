@@ -17,32 +17,63 @@ _Avoid_: Rank, position, standing
 ### Round lifecycle
 
 **Round**:
-One complete play from the first Finger landing to Results being shown or the Round being Aborted.
+One complete play from the first Finger landing to Results being shown or the Round being Aborted. The shell of a Round (Gathering, Lock-in, Results, Aborted) is the same in every Mode; what happens in between belongs to the Mode.
 _Avoid_: Game, match, session
+
+**Mode**:
+One way of turning a locked set of Fingers into a Ranking. Race and Classic exist; a Mode is chosen while no Fingers are on the screen and remembered for next time.
+_Avoid_: Game type, variant, rule set
+
+**Ranking**:
+The full ordering of Fingers a Mode produces, together with how many leading Places it actually decided. Undecided Places fall back to landing order and are not shown.
+_Avoid_: Leaderboard, scores
 
 **Gathering**:
 The phase in which Fingers join the screen. A Round stays in Gathering until at least two Fingers are present and the set of Fingers has been unchanged for three seconds.
 _Avoid_: Waiting, lobby, setup
 
 **Lock-in**:
-The moment the set of Fingers becomes final and the Round leaves Gathering. From Lock-in until Results, any new Finger landing on the screen is ignored.
+The moment the set of Fingers becomes final, the Round leaves Gathering, and the chosen Mode takes over. From Lock-in until Results, any new Finger landing on the screen is ignored.
 _Avoid_: Ready, start, arm
 
 **Locked**:
-The brief phase immediately after Lock-in, before the Countdown begins, in which the Fingers are announced as committed.
+The brief beat immediately after Lock-in, in every Mode, in which the Fingers are announced as committed.
+
+### Race Mode
+
+**Race**:
+The Mode in which Fingers lift after Go and are ranked by Lift time. Stuzer's default Mode.
 
 **Countdown**:
-The phase between Locked and Go: three, two, one, spoken at a fixed one-second cadence. If every Finger has lifted before "one" is spoken, the Round is Aborted; from "one" onward, everyone letting go is simply a False Start for all.
+The Race phase between Locked and Go: three, two, one, spoken at a fixed one-second cadence. If every Finger has lifted before "one" is spoken, the Round is Aborted; from "one" onward, everyone letting go is simply a False Start for all.
 
 **Go**:
 The distinct cue one beat after the Countdown reaches one. It is the zero point for every Lift time in the Round.
 _Avoid_: Start, zero, release
 
-**Race**:
-The phase after Go during which Fingers lift and earn Places.
+**Racing**:
+The Race phase after Go during which Fingers lift and earn Places.
+
+### Classic Mode
+
+**Classic**:
+The Mode in which a Spotlight hops between held Fingers during a Suspense and stops on one at random. Only first Place is decided.
+
+**Suspense**:
+The Classic phase after Locked in which the Spotlight hops with slowing rhythm. A Finger that lifts during Suspense drops out of the draw.
+
+**Spotlight**:
+The single highlighted Finger during Suspense; where it stops is the Chosen Finger.
+_Avoid_: Cursor, selector
+
+**Chosen**:
+The Finger the Spotlight stopped on: first player in Classic.
+_Avoid_: Winner, picked
+
+### Shared phases
 
 **Results**:
-The phase after the Race in which each Finger's Place and Lift time is displayed at the spot where it lifted. Any new Finger landing during Results begins a new Round.
+The phase after a Mode finishes in which the Ranking is shown in that Mode's own way. Any new Finger landing during Results begins a new Round.
 _Avoid_: Scoreboard, summary, leaderboard
 
 **Aborted**:

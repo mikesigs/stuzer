@@ -11,8 +11,10 @@ The rules and vocabulary live in [CONTEXT.md](CONTEXT.md). The spec is
 
 | Path | What |
 | --- | --- |
-| `lib/domain/` | Pure Dart Round state machine. No Flutter, no timers. Every rule is tested in `test/domain/`. |
-| `lib/game/` | Flutter glue: pointer events and timers into the Round, painter, overlay text. |
+| `lib/domain/` | Pure Dart Round shell (Gathering, Lock-in, Results, Aborted). No Flutter, no timers. Tested in `test/domain/`. |
+| `lib/domain/modes/` | One folder per Mode: its session state machine, config, and effects. Race and Classic today. |
+| `lib/game/` | Flutter glue: pointer events and timers into the Round, shared painter, mode picker. |
+| `lib/game/modes/` | Each Mode's presentation and the registry that lists them. |
 | `lib/audio/` | Synthesised sounds (no audio assets) played through `flutter_soloud`. |
 | `.devcontainer/` | VS Code Dev Container with Flutter, Android SDK, and JDK. |
 | `scripts/` | Helpers for running the container and the host `adb` server. |
@@ -60,11 +62,14 @@ with the new values:
 scripts\push-config.ps1
 ```
 
-Top-level keys tune Gathering and the Countdown. The `straggler` section
-holds `afterSeconds` (teasing starts this long after Go), `messageCount`,
-`messageSeconds` (how long each line stays up), and `messages`, the pool of
-lines. Each Race draws `messageCount` lines from the pool at random with no
-repeats, and the Race closes at `afterSeconds + messageCount * messageSeconds`.
+Top-level keys tune Gathering and the beat. `modes.race` holds
+`countdownFrom` and a `straggler` section: `afterSeconds` (teasing starts
+this long after Go), `messageCount`, `messageSeconds` (how long each line
+stays up), and `messages`, the pool of lines. Each Race draws `messageCount`
+lines at random with no repeats and closes at
+`afterSeconds + messageCount * messageSeconds`. `modes.classic` holds
+`suspenseSeconds`, `firstHopMs`, `hopGrowth`, and `maxHopMs` for the
+spotlight's rhythm.
 
 The app reads the file at startup and again whenever it returns to the
 foreground, so you can also edit it on the device and just switch away and
@@ -74,7 +79,15 @@ screen is empty. On first run the app writes its defaults to the same place
 `adb shell run-as`). Missing or invalid keys fall back to the built-in
 defaults, which match the spec.
 
-## Rules in one breath
+## Modes
+
+**Race** (default): after Go, fastest finger off the screen goes first.
+**Classic**: a spotlight hops between fingers with a slowing rhythm and
+stops on one. Switch with the pill at the bottom of the empty screen; the
+choice is remembered. Adding a Mode means a folder under `lib/domain/modes/`,
+a presentation under `lib/game/modes/`, and one line in the registry.
+
+## Race rules in one breath
 
 Two or more fingers unchanged for 3 s lock in. One locked beat, then
 3, 2, 1 at one per second, then Go. If everyone lets go before the "1"

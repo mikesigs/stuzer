@@ -2,41 +2,42 @@ import 'dart:math';
 
 import 'effects.dart';
 import 'finger.dart';
+import 'mode.dart';
 import 'round_config.dart';
-import 'standings.dart';
 
 export 'effects.dart';
 export 'finger.dart';
+export 'mode.dart';
 export 'round_config.dart';
-export 'standings.dart';
 
 /// Where a Round is in its lifecycle. See CONTEXT.md for the language.
-enum RoundPhase { gathering, locked, countdown, race, results, aborted }
+/// While [playing], the Mode's session has the detail.
+enum RoundPhase { gathering, playing, results, aborted }
 
-/// The Round state machine. Pure Dart, no timers, no Flutter.
+/// The Round shell. Pure Dart, no timers, no Flutter.
+///
+/// Owns Gathering, Lock-in, Results, and Aborted for every Mode. At Lock-in
+/// it builds a [ModeSession] with [startMode] and forwards Lifts and time to
+/// it until the session has a [Ranking] or asks to abort.
 ///
 /// Feed it timestamped finger events and call [advance] with the current
 /// monotonic time; it returns the [RoundEffect]s the presentation should
-/// react to. [nextDeadline] says when the next time-driven transition is due,
-/// so the caller can schedule a single timer rather than polling.
+/// react to. [nextDeadline] says when the next transition is due, so the
+/// caller can schedule a single timer rather than polling.
 class Round {
-  Round({this.config = const RoundConfig()});
+  Round({this.config = const RoundConfig(), required this.startMode});
 
   final RoundConfig config;
+  final ModeSessionFactory startMode;
 
   RoundPhase _phase = RoundPhase.gathering;
   final Map<int, Finger> _fingers = {};
   final Set<int> _ignoredPointers = {};
   int _nextOrdinal = 0;
-
+  Duration? _stableAt;
   Duration? _lockInAt;
-  Duration? _goAt;
-  Duration? _nextTeaseAt;
-  Duration? _closeAt;
-  int? _countdownNumber;
-  int _teaseCount = 0;
-  List<Placement>? _placements;
-  Duration? _nextDeadline;
+  ModeSession? _session;
+  Ranking? _ranking;
 
   RoundPhase get phase => _phase;
 
@@ -47,18 +48,21 @@ class Round {
 
   List<Finger> get heldFingers => fingers.where((f) => f.isHeld).toList();
 
-  /// When the next time-driven transition happens, or null if none is due.
-  Duration? get nextDeadline => _nextDeadline;
-
   Duration? get lockInAt => _lockInAt;
-  Duration? get goAt => _goAt;
 
-  /// Number currently shown during Countdown, else null.
-  int? get countdownNumber =>
-      _phase == RoundPhase.countdown ? _countdownNumber : null;
+  /// The Mode's session while playing, and kept through Results so the
+  /// presentation can show Mode-specific detail.
+  ModeSession? get session => _session;
 
-  /// Final standings once the Race has closed, else null.
-  List<Placement>? get placements => _placements;
+  /// Final Ranking once the Mode has decided, else null.
+  Ranking? get ranking => _ranking;
+
+  /// When the next time-driven transition happens, or null if none is due.
+  Duration? get nextDeadline => switch (_phase) {
+        RoundPhase.gathering => _stableAt,
+        RoundPhase.playing => _session!.nextDeadline,
+        _ => null,
+      };
 
   // ---------------------------------------------------------------- events
 
@@ -78,9 +82,7 @@ class Round {
         _fingers[pointer] = finger;
         _recomputeStability(time);
         effects.add(FingerLanded(finger));
-      case RoundPhase.locked:
-      case RoundPhase.countdown:
-      case RoundPhase.race:
+      case RoundPhase.playing:
         _ignoredPointers.add(pointer);
       case RoundPhase.results:
       case RoundPhase.aborted:
@@ -106,27 +108,9 @@ class Round {
         _fingers.remove(pointer);
         _recomputeStability(time);
         effects.add(FingerLeft(finger));
-      case RoundPhase.locked:
-      case RoundPhase.countdown:
+      case RoundPhase.playing:
         finger.lift(time);
-        if (heldFingers.isEmpty && !_finalBeatStarted) {
-          // Nobody left to race, and the Round has not reached the "1" beat.
-          // Abort now rather than make the table sit through the Countdown.
-          _reset();
-          _phase = RoundPhase.aborted;
-          effects.add(const Aborted(AbortReason.everyoneLetGo));
-        } else {
-          effects.add(FalseStarted(finger));
-        }
-      case RoundPhase.race:
-        finger.lift(time);
-        if (time < _goAt!) {
-          // Late-delivered event that really happened before Go.
-          effects.add(FalseStarted(finger));
-        } else {
-          effects.add(Lifted(finger, _legitimateLiftCount()));
-        }
-        if (heldFingers.isEmpty) effects.add(_closeRace());
+        _delegate(effects, _session!.fingerUp(finger, time));
       case RoundPhase.results:
       case RoundPhase.aborted:
         break;
@@ -142,44 +126,24 @@ class Round {
       _ignoredPointers.clear();
       return effects;
     }
-    _reset();
-    _phase = RoundPhase.aborted;
-    effects.add(Aborted(reason));
+    _abort(reason, effects);
     return effects;
   }
 
   /// Fire every time-driven transition due at or before [time].
   List<RoundEffect> advance(Duration time) {
     final effects = <RoundEffect>[];
-    while (_nextDeadline != null && _nextDeadline! <= time) {
-      final due = _nextDeadline!;
+    while (true) {
+      final due = nextDeadline;
+      if (due == null || due > time) break;
       switch (_phase) {
         case RoundPhase.gathering:
           _lockIn(due, effects);
-        case RoundPhase.locked:
-          _phase = RoundPhase.countdown;
-          _countdownNumber = config.countdownFrom;
-          effects.add(CountdownTick(_countdownNumber!));
-          _nextDeadline = due + config.beat;
-        case RoundPhase.countdown:
-          if (_countdownNumber! > 1) {
-            _countdownNumber = _countdownNumber! - 1;
-            effects.add(CountdownTick(_countdownNumber!));
-            _nextDeadline = due + config.beat;
-          } else {
-            _go(due, effects);
-          }
-        case RoundPhase.race:
-          if (due >= _closeAt!) {
-            effects.add(_closeRace());
-          } else {
-            effects.add(StragglersTeased(heldFingers, _teaseCount++));
-            _nextTeaseAt = due + config.stragglerMessageInterval;
-            _scheduleRaceDeadline();
-          }
+        case RoundPhase.playing:
+          _delegate(effects, _session!.advance(time));
         case RoundPhase.results:
         case RoundPhase.aborted:
-          _nextDeadline = null;
+          return effects;
       }
     }
     return effects;
@@ -187,53 +151,47 @@ class Round {
 
   // ----------------------------------------------------------- transitions
 
-  /// True once the Countdown has spoken "1". From then on, everyone letting
-  /// go is a False Start across the board rather than an abort.
-  bool get _finalBeatStarted =>
-      _phase == RoundPhase.countdown && _countdownNumber == 1;
-
-  int _legitimateLiftCount() => _fingers.values
-      .where((f) => f.liftedAt != null && f.liftedAt! >= _goAt!)
-      .length;
-
   void _recomputeStability(Duration time) {
-    _nextDeadline = _fingers.length >= config.minFingers
+    _stableAt = _fingers.length >= config.minFingers
         ? time + config.gatheringStability
         : null;
   }
 
   void _lockIn(Duration at, List<RoundEffect> effects) {
-    _phase = RoundPhase.locked;
+    _phase = RoundPhase.playing;
     _lockInAt = at;
-    _nextDeadline = at + config.beat;
+    _stableAt = null;
+    _session = startMode(fingers, at);
     effects.add(LockedIn(fingers));
   }
 
-  void _go(Duration at, List<RoundEffect> effects) {
-    _phase = RoundPhase.race;
-    _goAt = at;
-    _countdownNumber = null;
-    _closeAt = at + config.raceDuration;
-    _nextTeaseAt = at + config.stragglerAfter;
-    effects.add(const Go());
-    if (heldFingers.isEmpty) {
-      effects.add(_closeRace());
-    } else {
-      _scheduleRaceDeadline();
+  /// Fold a session's effects into ours and react to what they mean.
+  void _delegate(List<RoundEffect> effects, List<RoundEffect> fromSession) {
+    Aborted? abort;
+    for (final e in fromSession) {
+      if (e is Aborted) {
+        abort = e;
+      } else {
+        effects.add(e);
+      }
+    }
+    if (abort != null) {
+      _abort(abort.reason, effects);
+      return;
+    }
+    final ranking = _session!.ranking;
+    if (ranking != null && _phase == RoundPhase.playing) {
+      _phase = RoundPhase.results;
+      _ranking = ranking;
+      _ignoredPointers.clear();
+      effects.add(RoundFinished(ranking));
     }
   }
 
-  void _scheduleRaceDeadline() {
-    final tease = _nextTeaseAt!;
-    _nextDeadline = tease < _closeAt! ? tease : _closeAt;
-  }
-
-  RaceClosed _closeRace() {
-    _phase = RoundPhase.results;
-    _placements = rankFingers(_fingers.values, _goAt!);
-    _nextDeadline = null;
-    _ignoredPointers.clear();
-    return RaceClosed(_placements!);
+  void _abort(AbortReason reason, List<RoundEffect> effects) {
+    _reset();
+    _phase = RoundPhase.aborted;
+    effects.add(Aborted(reason));
   }
 
   void _reset() {
@@ -241,13 +199,9 @@ class Round {
     _fingers.clear();
     _ignoredPointers.clear();
     _nextOrdinal = 0;
+    _stableAt = null;
     _lockInAt = null;
-    _goAt = null;
-    _nextTeaseAt = null;
-    _closeAt = null;
-    _countdownNumber = null;
-    _teaseCount = 0;
-    _placements = null;
-    _nextDeadline = null;
+    _session = null;
+    _ranking = null;
   }
 }
