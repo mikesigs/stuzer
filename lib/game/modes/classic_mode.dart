@@ -96,32 +96,6 @@ class ClassicUi extends ModeUi {
   }
 
   @override
-  void paintOver(Canvas canvas, Size size, Round round, Duration now) {
-    final c = _classic(round);
-    final lit = c?.chosen ?? c?.spotlight;
-    if (c == null || lit == null) return;
-    final pos = Offset(lit.position.x, lit.position.y);
-
-    // A soft beam from above onto the lit finger.
-    final beam = Paint()
-      ..shader = LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [
-          Colors.white.withValues(alpha: 0.0),
-          Colors.white.withValues(alpha: c.chosen == null ? 0.10 : 0.16),
-        ],
-      ).createShader(Rect.fromLTRB(pos.dx - 140, 0, pos.dx + 140, pos.dy));
-    final path = Path()
-      ..moveTo(pos.dx - 40, 0)
-      ..lineTo(pos.dx + 40, 0)
-      ..lineTo(pos.dx + 130, pos.dy)
-      ..lineTo(pos.dx - 130, pos.dy)
-      ..close();
-    canvas.drawPath(path, beam);
-  }
-
-  @override
   Widget? buildOverlay(BuildContext context, Round round, Duration now) {
     final c = _classic(round);
     if (c == null) return null;
