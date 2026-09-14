@@ -8,6 +8,9 @@ import 'synth.dart';
 class SoundEngine {
   SoundEngine._();
 
+  /// An engine that never plays anything. For tests and headless runs.
+  factory SoundEngine.silent() => SoundEngine._();
+
   static Future<SoundEngine> create() async {
     final engine = SoundEngine._();
     try {
@@ -49,7 +52,10 @@ class SoundEngine {
   }
 
   /// The note for the Finger with this landing ordinal. Cycles the scale.
-  void fingerNote(int ordinal) => _play(_notes[ordinal % _notes.length]);
+  void fingerNote(int ordinal) {
+    if (_notes.isEmpty) return;
+    _play(_notes[ordinal % _notes.length]);
+  }
   void tick() => _play(_tick);
   void go() => _play(_go);
   void lock() => _play(_lock);

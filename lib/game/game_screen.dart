@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
 import '../domain/round.dart';
+import 'finger_label.dart';
 import 'finger_palette.dart';
 import 'round_controller.dart';
 
@@ -242,25 +243,15 @@ class _GamePainter extends CustomPainter {
 
     _paintBursts(canvas, now);
 
-    final placements = round.placements;
     for (final finger in round.fingers) {
       final pos = Offset(finger.position.x, finger.position.y);
-      final color = fingerColor(finger.ordinal);
-      Placement? placement;
-      if (placements != null) {
-        placement = placements.firstWhere((p) => p.finger == finger);
-      }
-      _paintDisc(canvas, pos, color, finger, placement, round, now);
+      _paintDisc(canvas, pos, fingerColor(finger.ordinal), finger, round);
     }
   }
 
-  void _paintDisc(Canvas canvas, Offset pos, Color color, Finger finger,
-      Placement? placement, Round round, Duration now) {
+  void _paintDisc(
+      Canvas canvas, Offset pos, Color color, Finger finger, Round round) {
     final held = finger.isHeld;
-    final lifted = !held;
-    final falseStarted = lifted &&
-        round.goAt != null &&
-        finger.liftedAt! < round.goAt!;
 
     // Glow.
     final glow = Paint()
@@ -279,38 +270,10 @@ class _GamePainter extends CustomPainter {
       ..color = Colors.white.withValues(alpha: held ? 0.9 : 0.4);
     canvas.drawCircle(pos, discRadius, rim);
 
-    // Label: place during/after the Race, red for false starts.
-    String? big;
-    String? small;
-    Color labelColor = Colors.white;
-    if (placement != null) {
-      big = _ordinal(placement.place);
-      switch (placement.kind) {
-        case LiftKind.legitimate:
-          small = _fmt(placement.offsetFromGo!);
-        case LiftKind.falseStart:
-          labelColor = const Color(0xFFFF3B3B);
-          small = '${_fmt(-placement.offsetFromGo!)} early';
-        case LiftKind.straggler:
-          small = 'Held';
-      }
-    } else if (falseStarted) {
-      big = '!';
-      labelColor = const Color(0xFFFF3B3B);
-    } else if (lifted && round.goAt != null) {
-      // Provisional legitimate place during the Race.
-      final place = round.fingers
-          .where((f) =>
-              f.liftedAt != null &&
-              f.liftedAt! >= round.goAt! &&
-              (f.liftedAt! < finger.liftedAt! ||
-                  (f.liftedAt == finger.liftedAt &&
-                      f.landedAt <= finger.landedAt)))
-          .length;
-      big = _ordinal(place);
-      small = _fmt(finger.liftedAt! - round.goAt!);
-    }
-
+    final label = labelFor(finger, round);
+    final labelColor = label.alarm ? const Color(0xFFFF3B3B) : Colors.white;
+    final big = label.big;
+    final small = label.small;
     if (big != null) {
       _text(canvas, big, pos.translate(0, small == null ? 0 : -10),
           fontSize: 40, color: labelColor, weight: FontWeight.w900);
@@ -415,22 +378,6 @@ class _GamePainter extends CustomPainter {
       textDirection: TextDirection.ltr,
     )..layout();
     tp.paint(canvas, center - Offset(tp.width / 2, tp.height / 2));
-  }
-
-  static String _ordinal(int n) {
-    if (n % 100 >= 11 && n % 100 <= 13) return '${n}th';
-    return switch (n % 10) {
-      1 => '${n}st',
-      2 => '${n}nd',
-      3 => '${n}rd',
-      _ => '${n}th',
-    };
-  }
-
-  static String _fmt(Duration d) {
-    final sign = d.isNegative ? '-' : '+';
-    final ms = d.inMilliseconds.abs();
-    return '$sign${(ms / 1000).toStringAsFixed(3)}s';
   }
 
   @override

@@ -41,6 +41,7 @@ class RoundController extends ChangeNotifier {
 
   final _clock = Stopwatch()..start();
   Duration? _timelineOffset; // pointer timestamp minus stopwatch elapsed
+  Duration _floor = Duration.zero; // latest time the Round has been advanced to
   Timer? _timer;
 
   final bursts = <Burst>[];
@@ -50,8 +51,12 @@ class RoundController extends ChangeNotifier {
   AbortReason? abortReason;
   bool _cancelledByOs = false;
 
-  /// Current time on the pointer-event timeline.
-  Duration get now => _clock.elapsed + (_timelineOffset ?? Duration.zero);
+  /// Current time on the pointer-event timeline. Never runs backwards, even
+  /// if the wall clock and the pointer clock disagree.
+  Duration get now {
+    final t = _clock.elapsed + (_timelineOffset ?? Duration.zero);
+    return t > _floor ? t : _floor;
+  }
 
   // ------------------------------------------------------------- pointers
 
@@ -95,6 +100,7 @@ class RoundController extends ChangeNotifier {
 
   void _sync(Duration pointerTime) {
     _timelineOffset = pointerTime - _clock.elapsed;
+    if (pointerTime > _floor) _floor = pointerTime;
   }
 
   void _schedule() {
@@ -103,7 +109,11 @@ class RoundController extends ChangeNotifier {
     if (deadline == null) return;
     var wait = deadline - now;
     if (wait.isNegative) wait = Duration.zero;
-    _timer = Timer(wait, () => _dispatch(round.advance(now)));
+    _timer = Timer(wait, () {
+      // The deadline has passed by construction; advance at least that far.
+      if (deadline > _floor) _floor = deadline;
+      _dispatch(round.advance(now));
+    });
   }
 
   // ------------------------------------------------------------- effects
