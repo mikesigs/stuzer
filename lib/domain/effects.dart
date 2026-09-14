@@ -9,6 +9,9 @@ enum AbortReason {
 
   /// The app lost focus (call, notification shade, home).
   lostFocus,
+
+  /// Every Finger lifted during Locked, before the Countdown began.
+  everyoneLetGo,
 }
 
 /// Something the presentation layer should react to (sound, haptic, visual).

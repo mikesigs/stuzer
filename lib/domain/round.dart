@@ -107,6 +107,15 @@ class Round {
         _recomputeStability(time);
         effects.add(FingerLeft(finger));
       case RoundPhase.locked:
+        finger.lift(time);
+        if (heldFingers.isEmpty) {
+          // Nobody left to race before the Countdown even began.
+          _reset();
+          _phase = RoundPhase.aborted;
+          effects.add(const Aborted(AbortReason.everyoneLetGo));
+        } else {
+          effects.add(FalseStarted(finger));
+        }
       case RoundPhase.countdown:
         finger.lift(time);
         effects.add(FalseStarted(finger));

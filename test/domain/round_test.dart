@@ -6,23 +6,30 @@ import 'package:stuzer/domain/round.dart';
 const _origin = Point<double>(0, 0);
 Duration s(num seconds) => Duration(milliseconds: (seconds * 1000).round());
 
-/// Puts [count] fingers down at t=0 and advances to Lock-in at t=3s.
+/// Default timeline used by the helpers below:
+/// fingers land at 0, Lock-in at 3, Locked until 4, ticks 3/2/1 at 4/5/6,
+/// Go at 7, Straggler teasing at 9/10/11, Race closes at 12.
+const lockIn = 3;
+const go = 7;
+const close = 12;
+
+/// Puts [count] fingers down at t=0 and advances to Lock-in.
 Round lockedRound({int count = 3}) {
   final round = Round();
   for (var i = 0; i < count; i++) {
     round.fingerDown(i, _origin, s(0));
   }
-  round.advance(s(3));
+  round.advance(s(lockIn));
   expect(round.phase, RoundPhase.locked);
   return round;
 }
 
-/// A locked Round advanced to Go. Lock-in at 3s, Go at 9s.
+/// A locked Round advanced to Go.
 Round racingRound({int count = 3}) {
   final round = lockedRound(count: count);
-  round.advance(s(9));
+  round.advance(s(go));
   expect(round.phase, RoundPhase.race);
-  expect(round.goAt, s(9));
+  expect(round.goAt, s(go));
   return round;
 }
 
@@ -92,32 +99,31 @@ void main() {
   });
 
   group('Locked and Countdown', () {
-    test('Locked lasts one beat, then 5..1 tick once per second, then Go', () {
+    test('Locked lasts one beat, then 3, 2, 1 tick once per second, then Go',
+        () {
       final round = lockedRound();
-      expect(round.nextDeadline, s(4));
+      expect(round.nextDeadline, s(lockIn + 1));
 
       final ticks = <int>[];
-      for (var t = 4; t <= 8; t++) {
+      for (var t = lockIn + 1; t < go; t++) {
         final effects = round.advance(s(t));
         ticks.add((effects.single as CountdownTick).number);
         expect(round.countdownNumber, ticks.last);
       }
-      expect(ticks, [5, 4, 3, 2, 1]);
+      expect(ticks, [3, 2, 1]);
       expect(round.phase, RoundPhase.countdown);
 
-      final go = round.advance(s(9));
-      expect(go.single, isA<Go>());
+      final effects = round.advance(s(go));
+      expect(effects.single, isA<Go>());
       expect(round.phase, RoundPhase.race);
-      expect(round.goAt, s(9));
+      expect(round.goAt, s(go));
       expect(round.countdownNumber, isNull);
     });
 
     test('a big time jump fires every transition in order', () {
       final round = lockedRound();
-      final effects = round.advance(s(9));
+      final effects = round.advance(s(go));
       expect(effects.map((e) => e.runtimeType).toList(), [
-        CountdownTick,
-        CountdownTick,
         CountdownTick,
         CountdownTick,
         CountdownTick,
@@ -130,8 +136,8 @@ void main() {
       final landing = round.fingerDown(99, _origin, s(5));
       expect(landing.whereType<FingerLanded>(), isEmpty);
       expect(round.fingers.length, 2);
-      round.advance(s(9));
-      final lifting = round.fingerUp(99, s(9.1));
+      round.advance(s(go));
+      final lifting = round.fingerUp(99, s(go + 0.1));
       expect(lifting.whereType<Lifted>(), isEmpty);
       expect(lifting.whereType<FalseStarted>(), isEmpty);
       expect(round.placements, isNull);
@@ -142,9 +148,26 @@ void main() {
       final duringLocked = round.fingerUp(0, s(3.5));
       expect(duringLocked.single, isA<FalseStarted>());
 
-      final duringCountdown = round.fingerUp(1, s(6));
+      final duringCountdown = round.fingerUp(1, s(5));
       expect(duringCountdown.whereType<FalseStarted>().single.finger.id, 1);
       expect(round.phase, RoundPhase.countdown);
+    });
+
+    test('everyone letting go during Locked aborts the Round', () {
+      final round = lockedRound(count: 2);
+      final first = round.fingerUp(0, s(3.3));
+      expect(first.single, isA<FalseStarted>());
+
+      final last = round.fingerUp(1, s(3.6));
+      expect(last.single, isA<Aborted>());
+      expect((last.single as Aborted).reason, AbortReason.everyoneLetGo);
+      expect(round.phase, RoundPhase.aborted);
+      expect(round.fingers, isEmpty);
+      expect(round.nextDeadline, isNull);
+
+      // Nothing fires later.
+      expect(round.advance(s(20)), isEmpty);
+      expect(round.phase, RoundPhase.aborted);
     });
 
     test('a False Starter who re-touches is ignored', () {
@@ -152,18 +175,21 @@ void main() {
       round.fingerUp(0, s(5));
       expect(round.fingerDown(7, _origin, s(5.1)).whereType<FingerLanded>(),
           isEmpty);
-      round.advance(s(9));
-      expect(round.fingerUp(7, s(9.2)).whereType<Lifted>(), isEmpty);
+      round.advance(s(go));
+      expect(round.fingerUp(7, s(go + 0.2)).whereType<Lifted>(), isEmpty);
     });
 
-    test('if everyone False Starts the Race closes at Go', () {
+    test('if everyone False Starts during the Countdown the Race closes at Go',
+        () {
       final round = lockedRound(count: 2);
-      round.fingerUp(0, s(5));
-      round.fingerUp(1, s(6));
-      final effects = round.advance(s(9));
+      round.fingerUp(0, s(4.5));
+      round.fingerUp(1, s(5.5));
+      expect(round.phase, RoundPhase.countdown);
+      final effects = round.advance(s(go));
       expect(effects.map((e) => e.runtimeType).toList(),
           containsAllInOrder([Go, RaceClosed]));
       expect(round.phase, RoundPhase.results);
+      expect(placesOf(round.placements!), [1, 0]);
     });
   });
 
@@ -171,19 +197,19 @@ void main() {
     test('lifts after Go earn places in order and the first is the winner',
         () {
       final round = racingRound();
-      final first = round.fingerUp(1, s(9.2)).single as Lifted;
+      final first = round.fingerUp(1, s(go + 0.2)).single as Lifted;
       expect(first.place, 1);
       expect(first.isWinner, isTrue);
 
-      final second = round.fingerUp(0, s(9.3)).single as Lifted;
+      final second = round.fingerUp(0, s(go + 0.3)).single as Lifted;
       expect(second.place, 2);
       expect(second.isWinner, isFalse);
     });
 
     test('the Race closes as soon as every finger has lifted', () {
       final round = racingRound(count: 2);
-      round.fingerUp(0, s(9.2));
-      final effects = round.fingerUp(1, s(9.4));
+      round.fingerUp(0, s(go + 0.2));
+      final effects = round.fingerUp(1, s(go + 0.4));
       expect(effects.last, isA<RaceClosed>());
       expect(round.phase, RoundPhase.results);
       expect(placesOf(round.placements!), [0, 1]);
@@ -194,17 +220,19 @@ void main() {
     test('Stragglers are teased at 2, 3, 4 seconds and the Race closes at 5',
         () {
       final round = racingRound(count: 2);
-      round.fingerUp(0, s(9.1));
-      expect(round.nextDeadline, s(11));
+      round.fingerUp(0, s(go + 0.1));
+      expect(round.nextDeadline, s(go + 2));
 
-      final tease0 = round.advance(s(11)).single as StragglersTeased;
+      final tease0 = round.advance(s(go + 2)).single as StragglersTeased;
       expect(tease0.messageIndex, 0);
       expect(tease0.stragglers.single.id, 1);
 
-      expect((round.advance(s(12)).single as StragglersTeased).messageIndex, 1);
-      expect((round.advance(s(13)).single as StragglersTeased).messageIndex, 2);
+      expect((round.advance(s(go + 3)).single as StragglersTeased).messageIndex,
+          1);
+      expect((round.advance(s(go + 4)).single as StragglersTeased).messageIndex,
+          2);
 
-      final closed = round.advance(s(14)).single as RaceClosed;
+      final closed = round.advance(s(close)).single as RaceClosed;
       expect(closed.placements.last.kind, LiftKind.straggler);
       expect(closed.placements.last.finger.id, 1);
       expect(closed.placements.last.offsetFromGo, isNull);
@@ -213,16 +241,16 @@ void main() {
 
     test('a late-delivered lift stamped before Go is a False Start', () {
       final round = racingRound();
-      final effects = round.fingerUp(0, s(8.9));
+      final effects = round.fingerUp(0, s(go - 0.1));
       expect(effects.single, isA<FalseStarted>());
     });
 
     test('a Straggler lifting during Results changes nothing', () {
       final round = racingRound(count: 2);
-      round.fingerUp(0, s(9.1));
-      round.advance(s(14));
+      round.fingerUp(0, s(go + 0.1));
+      round.advance(s(close));
       final before = round.placements;
-      expect(round.fingerUp(1, s(15)), isEmpty);
+      expect(round.fingerUp(1, s(close + 1)), isEmpty);
       expect(round.placements, same(before));
     });
   });
@@ -230,21 +258,21 @@ void main() {
   group('Placement rules', () {
     test('legitimate lifts, then False Starts (earliest last), then Stragglers',
         () {
-      // Fingers 0..5 land at t=0..0.5 in id order.
+      // Fingers 0..5 land at t=0..0.5 in id order. Lock-in 3.5, Go 7.5.
       final round = Round();
       for (var i = 0; i < 6; i++) {
         round.fingerDown(i, _origin, s(i * 0.1));
       }
-      round.advance(s(3.5)); // Lock-in at 3.5, Go at 9.5
-      round.advance(s(9.5));
-      expect(round.goAt, s(9.5));
+      round.advance(s(3.5));
+      round.advance(s(7.5));
+      expect(round.goAt, s(7.5));
 
-      round.fingerUp(0, s(8.0)); // false start, earliest jump
-      round.fingerUp(1, s(9.2)); // false start, closer to Go
-      round.fingerUp(2, s(9.9)); // legit, 2nd
-      round.fingerUp(3, s(9.7)); // legit, 1st
+      round.fingerUp(0, s(6.0)); // false start, earliest jump
+      round.fingerUp(1, s(7.2)); // false start, closer to Go
+      round.fingerUp(2, s(7.9)); // legit, 2nd
+      round.fingerUp(3, s(7.7)); // legit, 1st
       // 4 and 5 are stragglers
-      final closed = round.advance(s(14.5)).last as RaceClosed;
+      final closed = round.advance(s(12.5)).last as RaceClosed;
 
       expect(placesOf(closed.placements), [3, 2, 1, 0, 4, 5]);
       expect(closed.placements.map((p) => p.kind).toList(), [
@@ -255,7 +283,8 @@ void main() {
         LiftKind.straggler,
         LiftKind.straggler,
       ]);
-      expect(closed.placements.map((p) => p.place).toList(), [1, 2, 3, 4, 5, 6]);
+      expect(
+          closed.placements.map((p) => p.place).toList(), [1, 2, 3, 4, 5, 6]);
       expect(closed.placements[2].offsetFromGo, s(-0.3));
       expect(closed.placements[3].offsetFromGo, s(-1.5));
     });
@@ -266,14 +295,16 @@ void main() {
       round.fingerDown(20, _origin, s(0.1)); // landed first
       round.fingerDown(30, _origin, s(0.4));
       round.fingerDown(40, _origin, s(0.3));
-      round.advance(s(9.4));
-      final go = round.goAt!;
+      // The last landing *event* was at 0.3, so Lock-in is 3.3 and Go 7.3.
+      round.advance(s(7.3));
+      final goAt = round.goAt!;
+      expect(goAt, s(7.3));
 
       // Same legit lift time.
-      round.fingerUp(10, go + s(0.25));
-      round.fingerUp(20, go + s(0.25));
+      round.fingerUp(10, goAt + s(0.25));
+      round.fingerUp(20, goAt + s(0.25));
       // 30 and 40 are stragglers with no lift time at all.
-      final closed = round.advance(go + s(5)).last as RaceClosed;
+      final closed = round.advance(goAt + s(5)).last as RaceClosed;
       expect(placesOf(closed.placements), [20, 10, 40, 30]);
     });
 
@@ -281,10 +312,10 @@ void main() {
       final round = Round();
       round.fingerDown(1, _origin, s(0.2));
       round.fingerDown(2, _origin, s(0.1));
-      round.advance(s(3.2));
+      round.advance(s(4.5)); // Lock-in 3.2, Countdown from 4.2
       round.fingerUp(1, s(5));
       round.fingerUp(2, s(5));
-      final closed = round.advance(s(9.2)).last as RaceClosed;
+      final closed = round.advance(s(7.2)).last as RaceClosed;
       expect(placesOf(closed.placements), [2, 1]);
     });
   });
@@ -292,8 +323,8 @@ void main() {
   group('Results and new Rounds', () {
     test('a finger landing during Results starts a fresh Round', () {
       final round = racingRound(count: 2);
-      round.fingerUp(0, s(9.1));
-      round.fingerUp(1, s(9.2));
+      round.fingerUp(0, s(go + 0.1));
+      round.fingerUp(1, s(go + 0.2));
       expect(round.phase, RoundPhase.results);
 
       final effects = round.fingerDown(50, _origin, s(20));
@@ -310,8 +341,8 @@ void main() {
       final cases = <(Round Function(), Duration)>[
         (() => Round()..fingerDown(0, _origin, s(0)), s(1)),
         (lockedRound, s(3.5)),
-        (() => lockedRound()..advance(s(6)), s(6.5)),
-        (racingRound, s(9.5)),
+        (() => lockedRound()..advance(s(5)), s(5.5)),
+        (racingRound, s(go + 0.5)),
       ];
       for (final (setup, at) in cases) {
         final round = setup();
@@ -325,9 +356,9 @@ void main() {
 
     test('losing focus during Results keeps the Results', () {
       final round = racingRound(count: 2);
-      round.fingerUp(0, s(9.1));
-      round.advance(s(14));
-      final effects = round.cancelAll(s(15), AbortReason.lostFocus);
+      round.fingerUp(0, s(go + 0.1));
+      round.advance(s(close));
+      final effects = round.cancelAll(s(close + 1), AbortReason.lostFocus);
       expect(effects.whereType<Aborted>(), isEmpty);
       expect(round.phase, RoundPhase.results);
     });

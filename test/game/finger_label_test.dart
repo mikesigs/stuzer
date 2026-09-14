@@ -29,19 +29,19 @@ void main() {
     final fingers = {for (final f in round.fingers) f.id: f};
     expect(labelFor(fingers[1]!, round), FingerLabel.none);
 
-    round.advance(s(3.2)); // Lock-in at 3.2, Go at 9.2
+    round.advance(s(3.2)); // Lock-in at 3.2, Go at 7.2
     round.fingerUp(1, s(5)); // False Start
     expect(labelFor(fingers[1]!, round), const FingerLabel(big: '!', alarm: true));
 
-    round.advance(s(9.2));
-    round.fingerUp(2, s(9.45));
+    round.advance(s(7.2));
+    round.fingerUp(2, s(7.45));
     expect(labelFor(fingers[2]!, round), const FingerLabel(big: '1st', small: '+0.250s'));
     expect(labelFor(fingers[3]!, round), FingerLabel.none);
 
-    round.advance(s(14.2)); // Race closes; 3 is a Straggler
+    round.advance(s(12.2)); // Race closes; 3 is a Straggler
     expect(labelFor(fingers[2]!, round), const FingerLabel(big: '1st', small: '+0.250s'));
     expect(labelFor(fingers[1]!, round),
-        const FingerLabel(big: '2nd', small: '4.200s early', alarm: true));
+        const FingerLabel(big: '2nd', small: '2.200s early', alarm: true));
     expect(labelFor(fingers[3]!, round), const FingerLabel(big: '3rd', small: 'Held'));
   });
 }

@@ -4,7 +4,7 @@ class RoundConfig {
     this.minFingers = 2,
     this.gatheringStability = const Duration(seconds: 3),
     this.beat = const Duration(seconds: 1),
-    this.countdownFrom = 5,
+    this.countdownFrom = 3,
     this.stragglerAfter = const Duration(seconds: 2),
     this.raceDuration = const Duration(seconds: 5),
   });

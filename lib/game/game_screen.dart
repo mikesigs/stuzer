@@ -108,26 +108,26 @@ class _Overlay extends StatelessWidget {
             controller.stragglerMessage != null) {
           message = Stack(children: [
             ?message,
-            Align(
-              alignment: const Alignment(0, 0.6),
-              child: _Hint(controller.stragglerMessage!),
-            ),
+            _Hint(controller.stragglerMessage!,
+                alignment: const Alignment(0, 0.7)),
           ]);
         }
       case RoundPhase.results:
-        message = const Align(
-          alignment: Alignment.bottomCenter,
-          child: Padding(
-            padding: EdgeInsets.only(bottom: 24),
-            child: _Hint('Touch to play again', small: true),
-          ),
+        message = const _Hint(
+          'Touch to play again',
+          small: true,
+          alignment: Alignment(0, 0.88),
         );
       case RoundPhase.aborted:
         final reason = controller.abortReason;
         message = _Hint(
-          reason == AbortReason.lostFocus
-              ? 'Interrupted. Touch to start over.'
-              : 'Too many fingers, the device gave up.\nTouch to start over.',
+          switch (reason) {
+            AbortReason.lostFocus => 'Interrupted. Touch to start over.',
+            AbortReason.everyoneLetGo =>
+              'Everyone let go!\nTouch to start over.',
+            AbortReason.touchesCancelled || null =>
+              'Too many fingers, the device gave up.\nTouch to start over.',
+          },
           emphasis: true,
         );
     }
@@ -142,15 +142,22 @@ class _Overlay extends StatelessWidget {
 }
 
 class _Hint extends StatelessWidget {
-  const _Hint(this.text, {this.emphasis = false, this.small = false});
+  const _Hint(
+    this.text, {
+    this.emphasis = false,
+    this.small = false,
+    this.alignment = Alignment.center,
+  });
 
   final String text;
   final bool emphasis;
   final bool small;
+  final Alignment alignment;
 
   @override
   Widget build(BuildContext context) {
-    return Center(
+    return Align(
+      alignment: alignment,
       child: Text(
         text,
         textAlign: TextAlign.center,

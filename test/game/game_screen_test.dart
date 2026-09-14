@@ -8,6 +8,8 @@ import 'package:stuzer/main.dart';
 
 Duration s(num seconds) => Duration(milliseconds: (seconds * 1000).round());
 
+/// Fingers land at 0, Lock-in 3, ticks 3/2/1 at 4/5/6, Go 7, close 12.
+
 /// Disc labels are painted on a canvas, so read them through [labelFor].
 FingerLabel labelOf(RoundController c, int pointer) {
   final finger = c.round.fingers.singleWhere((f) => f.id == pointer);
@@ -45,27 +47,27 @@ void main() {
     expect(controller.round.phase, RoundPhase.locked);
     expect(find.text('Locked in'), findsOneWidget);
 
-    // Countdown 5..1, one per beat.
-    for (final n in [5, 4, 3, 2, 1]) {
+    // Countdown 3, 2, 1, one per beat.
+    for (final n in [3, 2, 1]) {
       await tester.pump(s(1));
       expect(controller.round.phase, RoundPhase.countdown);
       expect(find.text('$n'), findsOneWidget, reason: 'expected $n on screen');
     }
 
-    // Go at 9 s.
+    // Go at 7 s.
     await tester.pump(s(1));
     expect(controller.round.phase, RoundPhase.race);
-    expect(controller.round.goAt, s(9));
+    expect(controller.round.goAt, s(7));
     expect(find.text('GO'), findsOneWidget);
 
     // Right finger lifts first and wins; left lifts next.
-    await right.up(timeStamp: s(9.2));
+    await right.up(timeStamp: s(7.2));
     await tester.pump();
     expect(controller.round.phase, RoundPhase.race);
     expect(labelOf(controller, 2),
         const FingerLabel(big: '1st', small: '+0.200s'));
 
-    await left.up(timeStamp: s(9.5));
+    await left.up(timeStamp: s(7.5));
     await tester.pump();
     expect(controller.round.phase, RoundPhase.results);
     expect(labelOf(controller, 1),
@@ -90,7 +92,7 @@ void main() {
     final a = await tester.startGesture(const Offset(300, 400), pointer: 1);
     final b = await tester.startGesture(const Offset(800, 400), pointer: 2);
     final c = await tester.startGesture(const Offset(1300, 400), pointer: 3);
-    await tester.pump(s(5)); // locked at 3, "5" at 4, "4" at 5
+    await tester.pump(s(5)); // locked at 3, "3" at 4, "2" at 5
 
     await a.up(timeStamp: s(5.5)); // False Start
     await tester.pump();
@@ -98,26 +100,42 @@ void main() {
     expect(controller.bursts.where((x) => x.kind == BurstKind.falseStart),
         hasLength(1));
 
-    await tester.pump(s(4)); // Go at 9
+    await tester.pump(s(2)); // 7.5 s: Go was at 7
     expect(controller.round.phase, RoundPhase.race);
 
-    await b.up(timeStamp: s(9.3));
-    await tester.pump(s(2)); // 11 s: first tease
+    await b.up(timeStamp: s(7.3));
+    await tester.pump(s(2)); // 9.5 s: first tease at 9
     expect(controller.stragglerMessage, isNotNull);
     expect(find.text(controller.stragglerMessage!), findsOneWidget);
 
-    await tester.pump(s(3)); // 14 s: Race closes
+    await tester.pump(s(3)); // 12.5 s: Race closed at 12
     expect(controller.round.phase, RoundPhase.results);
     expect(labelOf(controller, 2),
         const FingerLabel(big: '1st', small: '+0.300s'));
     expect(labelOf(controller, 1),
-        const FingerLabel(big: '2nd', small: '3.500s early', alarm: true));
-    expect(labelOf(controller, 3), const FingerLabel(big: '3rd', small: 'Held'));
+        const FingerLabel(big: '2nd', small: '1.500s early', alarm: true));
+    expect(
+        labelOf(controller, 3), const FingerLabel(big: '3rd', small: 'Held'));
     expect(controller.stragglerMessage, isNull);
 
-    await c.up(timeStamp: s(15));
+    await c.up(timeStamp: s(13));
     await tester.pump();
     expect(controller.round.phase, RoundPhase.results);
+  });
+
+  testWidgets('everyone letting go during Locked shows the abort message',
+      (tester) async {
+    final controller = await pumpApp(tester);
+    final a = await tester.startGesture(const Offset(300, 400), pointer: 1);
+    final b = await tester.startGesture(const Offset(1300, 400), pointer: 2);
+    await tester.pump(s(3));
+    expect(controller.round.phase, RoundPhase.locked);
+
+    await a.up(timeStamp: s(3.2));
+    await b.up(timeStamp: s(3.4));
+    await tester.pump();
+    expect(controller.round.phase, RoundPhase.aborted);
+    expect(find.textContaining('Everyone let go'), findsOneWidget);
   });
 
   testWidgets('losing focus mid-Round aborts it with an explanation',
