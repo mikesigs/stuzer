@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
+import '../config/round_config_json.dart';
 import '../domain/round.dart';
 import 'finger_label.dart';
 import 'finger_palette.dart';
@@ -32,7 +33,11 @@ class _GameScreenState extends State<GameScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed) widget.controller.onAppHidden();
+    if (state == AppLifecycleState.resumed) {
+      widget.controller.onAppResumed();
+    } else {
+      widget.controller.onAppHidden();
+    }
   }
 
   @override
@@ -61,6 +66,10 @@ class _GameScreenState extends State<GameScreen>
             Align(
               alignment: Alignment.topRight,
               child: _MuteButton(controller: c),
+            ),
+            Align(
+              alignment: Alignment.bottomLeft,
+              child: _ConfigCaption(controller: c),
             ),
           ],
         ),
@@ -320,6 +329,35 @@ class _FilmReelPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _FilmReelPainter old) =>
       old.progress != progress || old.color != color || old.isGo != isGo;
+}
+
+/// Shows the active timings while Gathering, so a pushed config is visible.
+class _ConfigCaption extends StatelessWidget {
+  const _ConfigCaption({required this.controller});
+
+  final RoundController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final round = controller.round;
+    if (round.phase != RoundPhase.gathering || round.fingers.isNotEmpty) {
+      return const SizedBox.shrink();
+    }
+    return IgnorePointer(
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Text(
+            describeRoundConfig(round.config),
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.white.withValues(alpha: 0.35),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _MuteButton extends StatelessWidget {

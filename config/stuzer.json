@@ -1,0 +1,8 @@
+{
+  "minFingers": 2,
+  "gatheringStabilitySeconds": 1.5,
+  "beatSeconds": 1,
+  "countdownFrom": 3,
+  "stragglerAfterSeconds": 2,
+  "raceDurationSeconds": 5
+}

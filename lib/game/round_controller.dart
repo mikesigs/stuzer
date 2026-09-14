@@ -34,10 +34,30 @@ enum BurstKind { ripple, falseStart, confetti, flourish }
 /// scheduled from the Round's [Round.nextDeadline] rather than polled.
 class RoundController extends ChangeNotifier {
   RoundController({required this.sounds, Round? round})
-      : round = round ?? Round();
+      : _round = round ?? Round();
 
-  final Round round;
+  Round _round;
+  Round get round => _round;
   final SoundEngine sounds;
+
+  /// Swap in new timings. Only takes effect while no Round is in progress,
+  /// so a live Countdown is never disturbed. Returns whether it applied.
+  bool applyConfig(RoundConfig config) {
+    final idle = switch (round.phase) {
+      RoundPhase.gathering => round.fingers.isEmpty,
+      RoundPhase.results || RoundPhase.aborted => true,
+      _ => false,
+    };
+    if (!idle) return false;
+    _timer?.cancel();
+    _round = Round(config: config);
+    bursts.clear();
+    stragglerMessage = null;
+    lastTickNumber = null;
+    abortReason = null;
+    notifyListeners();
+    return true;
+  }
 
   final _clock = Stopwatch()..start();
   Duration? _timelineOffset; // pointer timestamp minus stopwatch elapsed
@@ -95,6 +115,18 @@ class RoundController extends ChangeNotifier {
     if (round.phase == RoundPhase.gathering && round.fingers.isEmpty) return;
     _dispatch(round.cancelAll(now, AbortReason.lostFocus));
   }
+
+  /// Called when the app returns to the foreground. Reloads tuning from
+  /// [loadConfig] if one was supplied.
+  Future<void> onAppResumed() async {
+    final loader = loadConfig;
+    if (loader == null) return;
+    final config = await loader();
+    applyConfig(config);
+  }
+
+  /// Optional source of fresh tuning, consulted on resume.
+  Future<RoundConfig> Function()? loadConfig;
 
   // -------------------------------------------------------------- timing
 

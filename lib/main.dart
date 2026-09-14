@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'audio/sound_engine.dart';
+import 'config/config_store.dart';
+import 'domain/round.dart';
 import 'game/game_screen.dart';
 import 'game/round_controller.dart';
 
@@ -15,8 +17,14 @@ Future<void> main() async {
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   await WakelockPlus.enable();
 
+  final store = ConfigStore();
+  final config = await store.load();
   final sounds = await SoundEngine.create();
-  runApp(StuzerApp(controller: RoundController(sounds: sounds)));
+  final controller = RoundController(
+    sounds: sounds,
+    round: Round(config: config),
+  )..loadConfig = store.load;
+  runApp(StuzerApp(controller: controller));
 }
 
 class StuzerApp extends StatelessWidget {

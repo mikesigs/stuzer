@@ -50,6 +50,24 @@ it; `flutter devices` in the container will then see it too.
 If the cable is a nuisance, Android 11+ wireless debugging works instead:
 pair from the host with `adb pair`, then `adb connect <ip>:<port>`.
 
+## Tuning without a rebuild
+
+Timings live in [config/stuzer.json](config/stuzer.json). Durations are in
+seconds and may be fractional. Push it to the phone and the app restarts
+with the new values:
+
+```powershell
+scripts\push-config.ps1
+```
+
+The app reads the file at startup and again whenever it returns to the
+foreground, so you can also edit it on the device and just switch away and
+back. The active timings show in small text at the bottom-left while the
+screen is empty. On first run the app writes its defaults to the same place
+(`/data/data/com.mikesigs.stuzer/files/stuzer.json`, reachable through
+`adb shell run-as`). Missing or invalid keys fall back to the built-in
+defaults, which match the spec.
+
 ## Rules in one breath
 
 Two or more fingers unchanged for 3 s lock in. One locked beat, then
