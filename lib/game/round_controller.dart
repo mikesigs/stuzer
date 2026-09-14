@@ -251,8 +251,10 @@ class RoundController extends ChangeNotifier {
 
   /// Test hooks: drive the Round and apply effects without arming timers.
   @visibleForTesting
-  void debugAdvance(Duration time) =>
-      _dispatch(round.advance(time), schedule: false);
+  void debugAdvance(Duration time) {
+    if (time > _floor) _floor = time;
+    _dispatch(round.advance(time), schedule: false);
+  }
 
   @visibleForTesting
   void debugLift(int pointer, Duration time) =>

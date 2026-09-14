@@ -76,23 +76,40 @@ class ClassicUi extends ModeUi {
   FingerStyle styleFor(Finger finger, Round round, Duration now) {
     final c = _classic(round);
     if (c == null) return FingerStyle.normal;
-    if (!finger.isHeld && c.chosen != finger) {
-      return const FingerStyle(alpha: 0.25);
+    final chosen = c.chosen;
+    final sinceChosen =
+        chosenAt == null ? 0.0 : (now - chosenAt!).inMicroseconds / 1e6;
+
+    if (chosen != null) {
+      if (finger == chosen) {
+        // The chosen finger keeps a pulsing ring.
+        final pulse = 0.5 + 0.5 * sin(sinceChosen * 6);
+        return FingerStyle(
+          alpha: 1,
+          ring: 10 + 6 * pulse,
+          ringColor: Colors.white.withValues(alpha: 0.95),
+        );
+      }
+      // Everyone else fades away, leaving only the chosen one.
+      const fadeSeconds = 0.5;
+      final start = finger.isHeld ? 0.55 : 0.25;
+      final t = (sinceChosen / fadeSeconds).clamp(0.0, 1.0);
+      return FingerStyle(alpha: start * (1 - Curves.easeOut.transform(t)));
     }
-    final lit = c.chosen ?? c.spotlight;
+
+    // Suspense: dropped-out fingers are faint, the lit one wears a ring,
+    // the rest recede a little while the light is elsewhere.
+    if (!finger.isHeld) return const FingerStyle(alpha: 0.25);
+    final lit = c.spotlight;
     if (lit == null) return FingerStyle.normal;
     if (finger == lit) {
-      // The lit finger wears a bright ring; once Chosen it pulses.
-      final since = chosenAt == null ? 0.0 : (now - chosenAt!).inMicroseconds / 1e6;
-      final pulse = c.chosen == null ? 0.0 : 0.5 + 0.5 * sin(since * 6);
       return FingerStyle(
         alpha: 1,
-        ring: 10 + 6 * pulse,
+        ring: 10,
         ringColor: Colors.white.withValues(alpha: 0.95),
       );
     }
-    // Everyone else recedes a little while the light is elsewhere.
-    return FingerStyle(alpha: c.chosen == null ? 0.55 : 0.35);
+    return const FingerStyle(alpha: 0.55);
   }
 
   @override

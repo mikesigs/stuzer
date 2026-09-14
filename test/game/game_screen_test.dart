@@ -195,6 +195,20 @@ void main() {
     expect(controller.bursts.where((x) => x.kind == BurstKind.confetti),
         hasLength(1));
 
+    // Only the chosen finger stays visible once the fade has run. Fake time
+    // does not move the controller's clock, so push it explicitly.
+    controller.debugAdvance(s(8.5));
+    await tester.pump();
+    for (final f in controller.round.fingers) {
+      final style = controller.modeUi.styleFor(f, controller.round, controller.now);
+      if (f == classic.chosen) {
+        expect(style.alpha, 1);
+        expect(style.ring, greaterThan(0));
+      } else {
+        expect(style.alpha, 0);
+      }
+    }
+
     await a.up(timeStamp: s(8));
     await b.up(timeStamp: s(8));
     await tester.pump();
