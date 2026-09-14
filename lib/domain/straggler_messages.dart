@@ -1,5 +1,6 @@
-/// Teasing shown to Stragglers, one per beat after Go. Add your own here.
-const stragglerMessages = <String>[
+/// Built-in teasing for Stragglers. The device config file can replace these;
+/// see config/stuzer.json.
+const defaultStragglerMessages = <String>[
   'Still there?',
   'You can let go now.',
   'The game started without you.',

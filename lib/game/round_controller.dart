@@ -6,8 +6,8 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 
 import '../audio/sound_engine.dart';
+import '../config/app_config.dart';
 import '../domain/round.dart';
-import '../domain/straggler_messages.dart';
 import 'finger_palette.dart';
 
 /// A transient visual triggered by a Round effect, drawn by the painter.
@@ -33,16 +33,27 @@ enum BurstKind { ripple, falseStart, confetti, flourish }
 /// All times are on the pointer-event timeline (device uptime). Timers are
 /// scheduled from the Round's [Round.nextDeadline] rather than polled.
 class RoundController extends ChangeNotifier {
-  RoundController({required this.sounds, Round? round})
-      : _round = round ?? Round();
+  RoundController({
+    required this.sounds,
+    AppConfig config = const AppConfig(),
+    Random? random,
+  })  : _config = config,
+        _round = Round(config: config.round),
+        _random = random ?? Random();
 
+  AppConfig _config;
+  AppConfig get config => _config;
   Round _round;
   Round get round => _round;
   final SoundEngine sounds;
+  final Random _random;
 
-  /// Swap in new timings. Only takes effect while no Round is in progress,
+  /// Teasing lines for the current Race, drawn at random from the pool.
+  List<String> _teaseOrder = const [];
+
+  /// Swap in new tuning. Only takes effect while no Round is in progress,
   /// so a live Countdown is never disturbed. Returns whether it applied.
-  bool applyConfig(RoundConfig config) {
+  bool applyConfig(AppConfig config) {
     final idle = switch (round.phase) {
       RoundPhase.gathering => round.fingers.isEmpty,
       RoundPhase.results || RoundPhase.aborted => true,
@@ -50,7 +61,8 @@ class RoundController extends ChangeNotifier {
     };
     if (!idle) return false;
     _timer?.cancel();
-    _round = Round(config: config);
+    _config = config;
+    _round = Round(config: config.round);
     bursts.clear();
     stragglerMessage = null;
     lastTickNumber = null;
@@ -58,6 +70,33 @@ class RoundController extends ChangeNotifier {
     notifyListeners();
     return true;
   }
+
+  /// A fresh random order of the message pool, long enough for one Race.
+  /// No line repeats until the whole pool has been used.
+  List<String> _drawTeases() {
+    final pool = _config.stragglerMessages;
+    if (pool.isEmpty) return const [];
+    final needed = round.config.stragglerMessageCount;
+    final out = <String>[];
+    while (out.length < needed) {
+      final batch = List.of(pool)..shuffle(_random);
+      // Across the seam between batches, avoid showing the same line twice
+      // in a row when the pool has more than one line.
+      if (out.isNotEmpty && batch.length > 1 && batch.first == out.last) {
+        batch.add(batch.removeAt(0));
+      }
+      out.addAll(batch);
+    }
+    return out.take(needed).toList();
+  }
+
+  /// Test hooks: drive the Round and apply effects without arming timers.
+  @visibleForTesting
+  void debugAdvance(Duration time) => _dispatch(round.advance(time), schedule: false);
+
+  @visibleForTesting
+  void debugLift(int pointer, Duration time) =>
+      _dispatch(round.fingerUp(pointer, time), schedule: false);
 
   final _clock = Stopwatch()..start();
   Duration? _timelineOffset; // pointer timestamp minus stopwatch elapsed
@@ -126,7 +165,7 @@ class RoundController extends ChangeNotifier {
   }
 
   /// Optional source of fresh tuning, consulted on resume.
-  Future<RoundConfig> Function()? loadConfig;
+  Future<AppConfig> Function()? loadConfig;
 
   // -------------------------------------------------------------- timing
 
@@ -150,11 +189,11 @@ class RoundController extends ChangeNotifier {
 
   // ------------------------------------------------------------- effects
 
-  void _dispatch(List<RoundEffect> effects) {
+  void _dispatch(List<RoundEffect> effects, {bool schedule = true}) {
     for (final effect in effects) {
       _apply(effect);
     }
-    _schedule();
+    if (schedule) _schedule();
     notifyListeners();
   }
 
@@ -188,6 +227,7 @@ class RoundController extends ChangeNotifier {
         HapticFeedback.heavyImpact();
         lastTickAt = now;
         lastTickNumber = 0;
+        _teaseOrder = _drawTeases();
       case FalseStarted(:final finger):
         HapticFeedback.vibrate();
         _burst(BurstKind.falseStart, finger);
@@ -196,8 +236,9 @@ class RoundController extends ChangeNotifier {
         HapticFeedback.lightImpact();
         _burst(BurstKind.ripple, finger);
       case StragglersTeased(:final messageIndex):
-        stragglerMessage =
-            stragglerMessages[messageIndex % stragglerMessages.length];
+        stragglerMessage = _teaseOrder.isEmpty
+            ? null
+            : _teaseOrder[messageIndex % _teaseOrder.length];
       case RaceClosed(:final placements):
         stragglerMessage = null;
         for (final p in placements) {

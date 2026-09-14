@@ -3,6 +3,21 @@
   "gatheringStabilitySeconds": 1.5,
   "beatSeconds": 1,
   "countdownFrom": 3,
-  "stragglerAfterSeconds": 2,
-  "raceDurationSeconds": 5
+  "straggler": {
+    "afterSeconds": 2,
+    "messageCount": 3,
+    "messageSeconds": 1,
+    "messages": [
+      "Still there?",
+      "You can let go now.",
+      "The game started without you.",
+      "Is your finger glued on?",
+      "Everyone is waiting. Everyone.",
+      "Last place is warming up for you.",
+      "Blink twice if you need help.",
+      "The screen is not a chair.",
+      "We admire your commitment.",
+      "Your finger has been awarded tenure."
+    ]
+  }
 }

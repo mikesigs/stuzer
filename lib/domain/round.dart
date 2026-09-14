@@ -174,7 +174,7 @@ class Round {
             effects.add(_closeRace());
           } else {
             effects.add(StragglersTeased(heldFingers, _teaseCount++));
-            _nextTeaseAt = due + config.beat;
+            _nextTeaseAt = due + config.stragglerMessageInterval;
             _scheduleRaceDeadline();
           }
         case RoundPhase.results:

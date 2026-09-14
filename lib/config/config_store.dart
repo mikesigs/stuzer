@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '../domain/round_config.dart';
+import 'app_config.dart';
 import 'round_config_json.dart';
 
 /// Reads the tuning file from the app's private storage on the device.
@@ -23,8 +23,8 @@ class ConfigStore {
     return File('${dir.path}${Platform.pathSeparator}$fileName');
   }
 
-  Future<RoundConfig> load() async {
-    const defaults = RoundConfig();
+  Future<AppConfig> load() async {
+    const defaults = AppConfig();
     try {
       final file = await _file();
       if (!await file.exists()) {
@@ -37,8 +37,9 @@ class ConfigStore {
         debugPrint('Stuzer config: ${file.path} is not a JSON object');
         return defaults;
       }
-      final config = roundConfigFromJson(decoded);
-      debugPrint('Stuzer config: ${describeRoundConfig(config)}');
+      final config = appConfigFromJson(decoded);
+      debugPrint('Stuzer config: ${describeRoundConfig(config.round)}, '
+          '${config.stragglerMessages.length} straggler messages');
       return config;
     } catch (e) {
       debugPrint('Stuzer config: unreadable, using defaults ($e)');
@@ -46,10 +47,10 @@ class ConfigStore {
     }
   }
 
-  Future<void> save(RoundConfig config) async {
+  Future<void> save(AppConfig config) async {
     final file = await _file();
     await file.parent.create(recursive: true);
     const encoder = JsonEncoder.withIndent('  ');
-    await file.writeAsString('${encoder.convert(roundConfigToJson(config))}\n');
+    await file.writeAsString('${encoder.convert(appConfigToJson(config))}\n');
   }
 }

@@ -4,7 +4,6 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'audio/sound_engine.dart';
 import 'config/config_store.dart';
-import 'domain/round.dart';
 import 'game/game_screen.dart';
 import 'game/round_controller.dart';
 
@@ -20,10 +19,8 @@ Future<void> main() async {
   final store = ConfigStore();
   final config = await store.load();
   final sounds = await SoundEngine.create();
-  final controller = RoundController(
-    sounds: sounds,
-    round: Round(config: config),
-  )..loadConfig = store.load;
+  final controller = RoundController(sounds: sounds, config: config)
+    ..loadConfig = store.load;
   runApp(StuzerApp(controller: controller));
 }
 

@@ -58,12 +58,14 @@ class Lifted extends RoundEffect {
   bool get isWinner => place == 1;
 }
 
-/// Held Fingers are being teased. Fires once per beat after [stragglerAfter].
+/// Held Fingers are being teased. Fires [RoundConfig.stragglerMessageCount]
+/// times, every [RoundConfig.stragglerMessageInterval], starting
+/// [RoundConfig.stragglerAfter] after Go.
 class StragglersTeased extends RoundEffect {
   const StragglersTeased(this.stragglers, this.messageIndex);
   final List<Finger> stragglers;
 
-  /// Increments each tease so the UI can rotate messages.
+  /// 0-based tease number within this Race.
   final int messageIndex;
 }
 

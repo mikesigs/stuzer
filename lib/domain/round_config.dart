@@ -6,7 +6,8 @@ class RoundConfig {
     this.beat = const Duration(seconds: 1),
     this.countdownFrom = 3,
     this.stragglerAfter = const Duration(seconds: 2),
-    this.raceDuration = const Duration(seconds: 5),
+    this.stragglerMessageCount = 3,
+    this.stragglerMessageInterval = const Duration(seconds: 1),
   });
 
   /// Fewest Fingers that can Lock-in.
@@ -24,6 +25,14 @@ class RoundConfig {
   /// Time after Go at which held Fingers become Stragglers and teasing starts.
   final Duration stragglerAfter;
 
-  /// Time after Go at which the Race closes.
-  final Duration raceDuration;
+  /// How many teasing messages are shown before the Race closes.
+  final int stragglerMessageCount;
+
+  /// How long each teasing message stays up.
+  final Duration stragglerMessageInterval;
+
+  /// Time after Go at which the Race closes: the teasing window runs its
+  /// full course, then the Race is over.
+  Duration get raceDuration =>
+      stragglerAfter + stragglerMessageInterval * stragglerMessageCount;
 }

@@ -60,6 +60,12 @@ with the new values:
 scripts\push-config.ps1
 ```
 
+Top-level keys tune Gathering and the Countdown. The `straggler` section
+holds `afterSeconds` (teasing starts this long after Go), `messageCount`,
+`messageSeconds` (how long each line stays up), and `messages`, the pool of
+lines. Each Race draws `messageCount` lines from the pool at random with no
+repeats, and the Race closes at `afterSeconds + messageCount * messageSeconds`.
+
 The app reads the file at startup and again whenever it returns to the
 foreground, so you can also edit it on the device and just switch away and
 back. The active timings show in small text at the bottom-left while the
