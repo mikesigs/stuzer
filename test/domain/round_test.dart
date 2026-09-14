@@ -153,21 +153,44 @@ void main() {
       expect(round.phase, RoundPhase.countdown);
     });
 
-    test('everyone letting go during Locked aborts the Round', () {
-      final round = lockedRound(count: 2);
-      final first = round.fingerUp(0, s(3.3));
-      expect(first.single, isA<FalseStarted>());
-
+    test('everyone letting go before the "1" beat aborts the Round', () {
+      // During Locked.
+      var round = lockedRound(count: 2);
+      expect(round.fingerUp(0, s(3.3)).single, isA<FalseStarted>());
       final last = round.fingerUp(1, s(3.6));
       expect(last.single, isA<Aborted>());
       expect((last.single as Aborted).reason, AbortReason.everyoneLetGo);
       expect(round.phase, RoundPhase.aborted);
       expect(round.fingers, isEmpty);
       expect(round.nextDeadline, isNull);
-
-      // Nothing fires later.
       expect(round.advance(s(20)), isEmpty);
       expect(round.phase, RoundPhase.aborted);
+
+      // During "3".
+      round = lockedRound(count: 2);
+      round.fingerUp(0, s(4.2));
+      expect(round.fingerUp(1, s(4.8)).single, isA<Aborted>());
+
+      // During "2", with the second lift arriving just before "1" is spoken.
+      round = lockedRound(count: 2);
+      round.fingerUp(0, s(5.1));
+      expect(round.fingerUp(1, s(5.999)).single, isA<Aborted>());
+    });
+
+    test('everyone letting go during the "1" beat is a False Start for all',
+        () {
+      final round = lockedRound(count: 2);
+      round.fingerUp(0, s(4.5)); // false start during "3"
+      round.advance(s(6)); // "1" spoken
+      expect(round.countdownNumber, 1);
+      final effects = round.fingerUp(1, s(6.4));
+      expect(effects.single, isA<FalseStarted>());
+      expect(round.phase, RoundPhase.countdown);
+
+      final atGo = round.advance(s(go));
+      expect(atGo.map((e) => e.runtimeType).toList(), [Go, RaceClosed]);
+      expect(round.phase, RoundPhase.results);
+      expect(placesOf(round.placements!), [1, 0]);
     });
 
     test('a False Starter who re-touches is ignored', () {
@@ -179,16 +202,15 @@ void main() {
       expect(round.fingerUp(7, s(go + 0.2)).whereType<Lifted>(), isEmpty);
     });
 
-    test('if everyone False Starts during the Countdown the Race closes at Go',
-        () {
+    test('one finger left through the Countdown still races alone at Go', () {
       final round = lockedRound(count: 2);
       round.fingerUp(0, s(4.5));
-      round.fingerUp(1, s(5.5));
       expect(round.phase, RoundPhase.countdown);
-      final effects = round.advance(s(go));
-      expect(effects.map((e) => e.runtimeType).toList(),
-          containsAllInOrder([Go, RaceClosed]));
-      expect(round.phase, RoundPhase.results);
+      round.advance(s(go));
+      expect(round.phase, RoundPhase.race);
+      final effects = round.fingerUp(1, s(go + 0.3));
+      expect(effects.first, isA<Lifted>());
+      expect(effects.last, isA<RaceClosed>());
       expect(placesOf(round.placements!), [1, 0]);
     });
   });
@@ -312,9 +334,9 @@ void main() {
       final round = Round();
       round.fingerDown(1, _origin, s(0.2));
       round.fingerDown(2, _origin, s(0.1));
-      round.advance(s(4.5)); // Lock-in 3.2, Countdown from 4.2
-      round.fingerUp(1, s(5));
-      round.fingerUp(2, s(5));
+      round.advance(s(6.2)); // Lock-in 3.2, "1" spoken at 6.2
+      round.fingerUp(1, s(6.5));
+      round.fingerUp(2, s(6.5));
       final closed = round.advance(s(7.2)).last as RaceClosed;
       expect(placesOf(closed.placements), [2, 1]);
     });

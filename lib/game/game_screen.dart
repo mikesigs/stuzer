@@ -98,10 +98,10 @@ class _Overlay extends StatelessWidget {
         if (number != null && at != null) {
           final progress =
               (now - at).inMicroseconds / round.config.beat.inMicroseconds;
-          message = _Marquee(
+          message = _FilmCountdown(
             text: number == 0 ? 'GO' : '$number',
             progress: progress.clamp(0.0, 1.0),
-            color: number == 0 ? const Color(0xFF7CFF6B) : Colors.white,
+            isGo: number == 0,
           );
         }
         if (round.phase == RoundPhase.race &&
@@ -172,42 +172,154 @@ class _Hint extends StatelessWidget {
   }
 }
 
-/// A countdown number sweeping right-to-left across the centre over one beat.
-class _Marquee extends StatelessWidget {
-  const _Marquee({
+/// An old film-leader countdown: a big number dead centre inside concentric
+/// rings and crosshairs, with a radial wipe sweeping once round per beat.
+class _FilmCountdown extends StatelessWidget {
+  const _FilmCountdown({
     required this.text,
     required this.progress,
-    required this.color,
+    required this.isGo,
   });
 
   final String text;
+
+  /// 0..1 through the current beat.
   final double progress;
-  final Color color;
+  final bool isGo;
 
   @override
   Widget build(BuildContext context) {
-    // Ease so the number lingers in the middle and rushes at the edges.
-    final eased = Curves.easeInOutCubic.transform(progress);
-    final x = 1.4 - 2.8 * eased; // Alignment x from off-right to off-left
-    final fade = (1 - (x.abs() - 0.9).clamp(0.0, 0.5) * 2).clamp(0.0, 1.0);
-    return Align(
-      alignment: Alignment(x, 0),
-      child: Opacity(
-        opacity: fade,
-        child: Text(
-          text,
-          style: TextStyle(
-            fontSize: 220,
-            fontWeight: FontWeight.w900,
-            color: color,
-            shadows: [
-              Shadow(color: color.withValues(alpha: 0.6), blurRadius: 40),
-            ],
+    final color = isGo ? const Color(0xFF7CFF6B) : Colors.white;
+    // A quick pop as each number lands, then a settle.
+    final pop = 1.0 + 0.18 * (1 - Curves.easeOutCubic.transform(
+        (progress / 0.18).clamp(0.0, 1.0)));
+    // Projector flicker.
+    final flicker = 0.9 + 0.1 * (0.5 + 0.5 * sin(progress * 47));
+    return LayoutBuilder(builder: (context, constraints) {
+      final side = min(constraints.maxWidth, constraints.maxHeight) * 0.92;
+      return Center(
+        child: SizedBox(
+          width: side,
+          height: side,
+          child: CustomPaint(
+            painter: _FilmReelPainter(
+              progress: progress,
+              color: color,
+              isGo: isGo,
+            ),
+            child: Center(
+              child: Transform.scale(
+                scale: pop,
+                child: Opacity(
+                  opacity: flicker,
+                  child: Text(
+                    text,
+                    style: TextStyle(
+                      fontSize: isGo ? side * 0.42 : side * 0.62,
+                      height: 1,
+                      fontWeight: FontWeight.w900,
+                      color: color,
+                      shadows: [
+                        Shadow(
+                            color: color.withValues(alpha: 0.5),
+                            blurRadius: 30),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
-      ),
-    );
+      );
+    });
   }
+}
+
+class _FilmReelPainter extends CustomPainter {
+  const _FilmReelPainter({
+    required this.progress,
+    required this.color,
+    required this.isGo,
+  });
+
+  final double progress;
+  final Color color;
+  final bool isGo;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = size.center(Offset.zero);
+    final r = size.shortestSide / 2;
+
+    final thin = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..color = color.withValues(alpha: 0.35);
+    final thick = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 5
+      ..color = color.withValues(alpha: 0.85);
+
+    // Crosshairs out past the rings.
+    canvas.drawLine(Offset(c.dx - r * 1.15, c.dy), Offset(c.dx + r * 1.15, c.dy), thin);
+    canvas.drawLine(Offset(c.dx, c.dy - r * 1.15), Offset(c.dx, c.dy + r * 1.15), thin);
+
+    // Rings.
+    canvas.drawCircle(c, r * 0.98, thick);
+    canvas.drawCircle(c, r * 0.86, thin);
+
+    if (isGo) {
+      // Rings burst outward on Go.
+      final burst = Curves.easeOut.transform(progress);
+      canvas.drawCircle(
+        c,
+        r * (0.98 + 0.6 * burst),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 10 * (1 - burst) + 1
+          ..color = color.withValues(alpha: 0.8 * (1 - burst)),
+      );
+      return;
+    }
+
+    // Radial wipe: a wedge sweeping clockwise from twelve o'clock, filled
+    // faintly, with a bright leading hand.
+    final sweep = 2 * pi * progress;
+    final rect = Rect.fromCircle(center: c, radius: r * 0.86);
+    canvas.drawArc(
+      rect,
+      -pi / 2,
+      sweep,
+      true,
+      Paint()..color = color.withValues(alpha: 0.10),
+    );
+    final hand = Offset(c.dx + cos(-pi / 2 + sweep) * r * 0.86,
+        c.dy + sin(-pi / 2 + sweep) * r * 0.86);
+    canvas.drawLine(
+      c,
+      hand,
+      Paint()
+        ..strokeWidth = 3
+        ..strokeCap = StrokeCap.round
+        ..color = color.withValues(alpha: 0.9),
+    );
+
+    // Tick marks around the outer ring, like sprocket holes.
+    final tick = Paint()
+      ..strokeWidth = 2
+      ..color = color.withValues(alpha: 0.5);
+    for (var i = 0; i < 24; i++) {
+      final a = i * pi / 12;
+      final inner = Offset(c.dx + cos(a) * r * 0.90, c.dy + sin(a) * r * 0.90);
+      final outer = Offset(c.dx + cos(a) * r * 0.95, c.dy + sin(a) * r * 0.95);
+      canvas.drawLine(inner, outer, tick);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _FilmReelPainter old) =>
+      old.progress != progress || old.color != color || old.isGo != isGo;
 }
 
 class _MuteButton extends StatelessWidget {

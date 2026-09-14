@@ -10,7 +10,7 @@ enum AbortReason {
   /// The app lost focus (call, notification shade, home).
   lostFocus,
 
-  /// Every Finger lifted during Locked, before the Countdown began.
+  /// Every Finger lifted after Lock-in but before the Countdown reached "1".
   everyoneLetGo,
 }
 

@@ -107,18 +107,17 @@ class Round {
         _recomputeStability(time);
         effects.add(FingerLeft(finger));
       case RoundPhase.locked:
+      case RoundPhase.countdown:
         finger.lift(time);
-        if (heldFingers.isEmpty) {
-          // Nobody left to race before the Countdown even began.
+        if (heldFingers.isEmpty && !_finalBeatStarted) {
+          // Nobody left to race, and the Round has not reached the "1" beat.
+          // Abort now rather than make the table sit through the Countdown.
           _reset();
           _phase = RoundPhase.aborted;
           effects.add(const Aborted(AbortReason.everyoneLetGo));
         } else {
           effects.add(FalseStarted(finger));
         }
-      case RoundPhase.countdown:
-        finger.lift(time);
-        effects.add(FalseStarted(finger));
       case RoundPhase.race:
         finger.lift(time);
         if (time < _goAt!) {
@@ -187,6 +186,11 @@ class Round {
   }
 
   // ----------------------------------------------------------- transitions
+
+  /// True once the Countdown has spoken "1". From then on, everyone letting
+  /// go is a False Start across the board rather than an abort.
+  bool get _finalBeatStarted =>
+      _phase == RoundPhase.countdown && _countdownNumber == 1;
 
   int _legitimateLiftCount() => _fingers.values
       .where((f) => f.liftedAt != null && f.liftedAt! >= _goAt!)

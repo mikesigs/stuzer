@@ -53,8 +53,8 @@ pair from the host with `adb pair`, then `adb connect <ip>:<port>`.
 ## Rules in one breath
 
 Two or more fingers unchanged for 3 s lock in. One locked beat, then
-3, 2, 1 at one per second, then Go. If everyone lets go during the locked
-beat the Round is abandoned. Lifts after Go rank by time. Lifts
+3, 2, 1 at one per second, then Go. If everyone lets go before the "1"
+count the Round is abandoned. Lifts after Go rank by time. Lifts
 before Go are False Starts and rank behind everyone, earliest jump last.
 Fingers still held 5 s after Go are Stragglers and rank behind all who lifted.
 Every tie goes to the finger that landed first.

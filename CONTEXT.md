@@ -29,10 +29,10 @@ The moment the set of Fingers becomes final and the Round leaves Gathering. From
 _Avoid_: Ready, start, arm
 
 **Locked**:
-The brief phase immediately after Lock-in, before the Countdown begins, in which the Fingers are announced as committed. If every Finger lifts during Locked, the Round is Aborted rather than raced.
+The brief phase immediately after Lock-in, before the Countdown begins, in which the Fingers are announced as committed.
 
 **Countdown**:
-The phase between Locked and Go: three, two, one, spoken at a fixed one-second cadence.
+The phase between Locked and Go: three, two, one, spoken at a fixed one-second cadence. If every Finger has lifted before "one" is spoken, the Round is Aborted; from "one" onward, everyone letting go is simply a False Start for all.
 
 **Go**:
 The distinct cue one beat after the Countdown reaches one. It is the zero point for every Lift time in the Round.
@@ -46,7 +46,7 @@ The phase after the Race in which each Finger's Place and Lift time is displayed
 _Avoid_: Scoreboard, summary, leaderboard
 
 **Aborted**:
-A Round torn down before it could finish: the operating system cancelled every touch, the app lost focus, or every Finger let go during Locked. Returns to Gathering with an explanation on screen.
+A Round torn down before it could finish: the operating system cancelled every touch, the app lost focus, or every Finger let go before the Countdown reached "one". Returns to Gathering with an explanation on screen.
 _Avoid_: Crashed, failed, reset
 
 ### Events
