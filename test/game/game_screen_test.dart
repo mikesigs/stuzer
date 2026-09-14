@@ -201,6 +201,33 @@ void main() {
     expect(controller.round.phase, RoundPhase.results);
   });
 
+  testWidgets('a slow touch on the picker or mute button is not a Finger',
+      (tester) async {
+    final controller = await pumpApp(tester);
+
+    final onPill = await tester.startGesture(
+        tester.getCenter(find.text('RACE')), pointer: 1);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(controller.round.fingers, isEmpty);
+    expect(find.text('RACE'), findsOneWidget, reason: 'picker stays');
+    await onPill.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(find.text('Classic'), findsOneWidget, reason: 'sheet opened');
+    await tester.tapAt(const Offset(800, 100)); // dismiss the sheet
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+
+    final onMute = await tester.startGesture(
+        tester.getCenter(find.byIcon(Icons.volume_up)), pointer: 2);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(controller.round.fingers, isEmpty);
+    await onMute.up();
+    await tester.pump();
+    expect(controller.sounds.muted, isTrue);
+    expect(controller.round.fingers, isEmpty);
+  });
+
   testWidgets('the picker switches Mode from the empty screen',
       (tester) async {
     final controller = await pumpApp(tester);

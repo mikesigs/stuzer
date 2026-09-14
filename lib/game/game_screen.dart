@@ -54,31 +54,39 @@ class _GameScreenState extends State<GameScreen>
     final c = widget.controller;
     return Scaffold(
       backgroundColor: const Color(0xFF0B0D14),
-      body: Listener(
-        behavior: HitTestBehavior.opaque,
-        onPointerDown: c.onPointerDown,
-        onPointerMove: c.onPointerMove,
-        onPointerUp: c.onPointerUp,
-        onPointerCancel: c.onPointerCancel,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            CustomPaint(painter: _GamePainter(c)),
-            _Overlay(controller: c),
-            Align(
-              alignment: Alignment.topRight,
-              child: _MuteButton(controller: c),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // The game layer. Every touch that reaches it is a Finger.
+          Listener(
+            behavior: HitTestBehavior.opaque,
+            onPointerDown: c.onPointerDown,
+            onPointerMove: c.onPointerMove,
+            onPointerUp: c.onPointerUp,
+            onPointerCancel: c.onPointerCancel,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                CustomPaint(painter: _GamePainter(c)),
+                _Overlay(controller: c),
+                Align(
+                  alignment: Alignment.bottomLeft,
+                  child: _ConfigCaption(controller: c),
+                ),
+              ],
             ),
-            Align(
-              alignment: Alignment.bottomLeft,
-              child: _ConfigCaption(controller: c),
-            ),
-            Align(
-              alignment: Alignment.bottomCenter,
-              child: ModePicker(controller: c),
-            ),
-          ],
-        ),
+          ),
+          // Controls sit above the game layer as siblings, not children, so
+          // a touch on them is a tap and never becomes a Finger.
+          Align(
+            alignment: Alignment.topRight,
+            child: _MuteButton(controller: c),
+          ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: ModePicker(controller: c),
+          ),
+        ],
       ),
     );
   }
