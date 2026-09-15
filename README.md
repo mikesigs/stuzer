@@ -21,33 +21,51 @@ The rules and vocabulary live in [CONTEXT.md](CONTEXT.md). The spec is
 
 ## Developing
 
-Everything runs inside the Dev Container. Only `adb` runs on Windows so the
-container can reach a phone over USB.
+Everything Flutter runs inside the Dev Container. Windows keeps only `adb`
+so the container can reach a phone over USB.
 
-One-time host setup (Windows):
+### One-time host setup (Windows)
 
 ```powershell
 winget install --id Google.PlatformTools
 ```
 
-Each session, start the host adb server so the container can reach it:
+Open a new terminal afterwards so `adb` is on your PATH.
+
+### Each session, on Windows
+
+Start the host adb server. It prints what it did and which devices it
+sees, then keeps running in the background:
 
 ```powershell
 scripts\adb-host.ps1
 ```
 
-Then either open the folder in VS Code and choose **Reopen in Container**, or
-run commands directly:
+Phone setup: enable Developer options, turn on USB debugging, plug in, and
+accept the "Allow USB debugging" prompt with "Always allow" ticked.
+
+### Working inside the container (recommended)
+
+Open the folder in VS Code and choose **Reopen in Container**. In the
+container's terminal, Flutter is already on the PATH, so run commands
+directly:
+
+```bash
+flutter devices        # should list your phone, via the host adb server
+flutter test
+flutter analyze
+flutter run            # hot reload on the phone
+```
+
+### Working from Windows without VS Code
+
+`scripts/dev.sh` is a wrapper for the *Windows* side: it starts the same
+container image with the same mounts and runs one command in it. Run it from
+Git Bash, not from inside the container (the container has no Docker):
 
 ```bash
 scripts/dev.sh flutter test
-scripts/dev.sh flutter analyze
-scripts/dev.sh flutter run
 ```
-
-Phone setup: enable Developer options, turn on USB debugging, plug in, and
-accept the "allow USB debugging" prompt. `adb devices` on the host should list
-it; `flutter devices` in the container will then see it too.
 
 If the cable is a nuisance, Android 11+ wireless debugging works instead:
 pair from the host with `adb pair`, then `adb connect <ip>:<port>`.
